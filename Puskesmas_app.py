@@ -287,8 +287,7 @@ def load_data(file):
     # 1. Kasus CSV biasa
     if ext == "csv":
         df_raw = pd.read_csv(file)
-
-    # 2. Jika excel (xlsx/xls)
+        
     elif ext in ["xlsx", "xls"]:
         try:
             if ext == "xlsx":
@@ -1259,3 +1258,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

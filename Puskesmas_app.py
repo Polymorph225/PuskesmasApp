@@ -9,7 +9,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report
 
-# ========== KONFIGURASI HALAMAN ==========
+# Pengaturan Konfig
 st.set_page_config(
     page_title="Dashboard Analisis Data Puskesmas",
     page_icon="🏥",
@@ -17,7 +17,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ========== TAMPILAN ==========
+# Tampilan
 def inject_custom_css():
     st.markdown(
         """
@@ -71,7 +71,7 @@ def inject_custom_css():
 
 inject_custom_css()
 
-# ========== HEADER UTAMA ==========
+# Header
 st.title("📊 Dashboard Analisis Data Puskesmas")
 
 st.markdown(
@@ -87,7 +87,7 @@ st.markdown(
     """
 )
 
-# ========= FUNGSI UTAMA PERSIAPAN DATA DAN Ai =========
+# Fungsi Persiapajn Data dan Ai
 
 @st.cache_resource
 def get_gemini_client():
@@ -118,7 +118,7 @@ def get_gemini_client():
     client = genai.Client(api_key=api_key)
     return client
 
-# ================== DATA CLEANING HELPER ==================
+# Data Cleaning
 
 # Nama kolom standar yang digunakan aplikasi
 TARGET_COLS = [
@@ -151,7 +151,7 @@ def _build_column_mapping(df_raw: pd.DataFrame) -> dict:
     """
     mapping = {}
     
-    # Kamus alias -> nama standar
+    # Alias -> nama standar
     alias_dict = {
         "tanggal_kunjungan": [
             "tanggalkunjungan", "tglkunjungan", "tanggal", "tgl", "visitdate",
@@ -328,7 +328,7 @@ def preprocess_data(df):
     if cols_to_drop:
         df = df.drop(columns=cols_to_drop)
 
-    # Pastikan ada kolom 'desa' jika ada kolom lain yang mengandung kata 'desa'
+    # Pastiin ada kolom 'desa' jika ada kolom lain yang mengandung kata 'desa'
     if "desa" not in df.columns:
         for c in df.columns:
             if "desa" in c.lower():
@@ -380,7 +380,7 @@ def apply_filters(_):
             st.info("Silakan upload file **CSV/Excel** yang berisi data kunjungan untuk mulai analisis.")
             return None, None
 
-        # >>> BACA DAN CLEANING DATA <<<
+        # Membaca dan data cleaning
         df_clean, df_raw = load_data(uploaded_file)
         df = preprocess_data(df_clean)
         
@@ -438,7 +438,7 @@ def apply_filters(_):
                     default=poli_unik,
                 )
 
-        # ---------- FILTER DEMOGRAFI (TERMASUK DESA) ----------
+        # Filter demografi
         with st.expander("Filter Demografi", expanded=False):
             # Filter jenis kelamin
             if "jenis_kelamin" in df.columns:
@@ -467,7 +467,7 @@ def apply_filters(_):
                     default=desa_unik,
                 )
 
-        # ---------- FILTER PEMBAYARAN ----------
+        # Filter pembayaran
         with st.expander("Filter Pembiayaan", expanded=False):
             if "pembiayaan" in df.columns:
                 bayar_unik = sorted(df["pembiayaan"].dropna().unique())
@@ -480,7 +480,7 @@ def apply_filters(_):
         st.markdown("---")
         st.caption("💡 Tip: Sesuaikan filter untuk melihat pola kunjungan berdasarkan segmen tertentu.")
 
-    # ================== MENGAPLIKASIKAN FILTER DI LUAR SIDEBAR ==================
+    # Menerapkan filter diluar sidebar
     df_filtered = df.copy()
     
     if date_range is not None and len(date_range) == 2:
@@ -548,7 +548,7 @@ def show_active_filters(filter_info):
         st.caption("🎯 **Filter aktif:** " + " | ".join(chips))
 
 
-# ========= HALAMAN NIH =========
+# Halaman Inti
 
 def page_overview(df_filtered, filter_info):
     st.subheader("📌 Ringkasan Umum")
@@ -839,7 +839,7 @@ def page_ml(df_filtered, filter_info):
     monthly["bulan"] = monthly["periode"].dt.month
     monthly["t"] = range(len(monthly))  # indeks waktu
 
-    # Definisikan 'lonjakan' sebagai bulan dengan kunjungan >= persentil tertentu
+    # Definisikan (lonjakan) sebagai bulan dengan kunjungan >= persentase tertentu
     persentil = st.slider(
         "Ambang definisi 'lonjakan kasus' (persentil historis)",
         min_value=50,
@@ -856,7 +856,7 @@ def page_ml(df_filtered, filter_info):
         f"≥ {threshold:.0f} kunjungan/bulan (persentil {persentil})."
     )
 
-    # Fitur & label
+    # Fitur dan label
     X = monthly[["t", "tahun", "bulan"]]
     y = monthly["is_lonjakan"]
 
@@ -916,7 +916,7 @@ def page_ml(df_filtered, filter_info):
         step=1,
     )
 
-    # Buat periode masa depan
+    # Buat periode kedepan
     last_period = monthly["periode"].max()
     future_periods = pd.date_range(
         start=last_period + pd.offsets.MonthBegin(1),
@@ -1211,7 +1211,7 @@ Jawab dengan bahasa Indonesia yang jelas, terstruktur (gunakan poin-poin), dan p
                 st.error(f"Terjadi kesalahan saat memanggil API Gemini: {e}")
 
 
-# ========= MAIN =========
+# Main
 
 def main():
     # Menerapkan filter & dapatkan data terfilter
@@ -1258,4 +1258,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 

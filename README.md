@@ -103,8 +103,8 @@ pip install -r requirements.txt
 
 # 4. Set API key Gemini (opsi)
 # Bisa melalui environment variable:
-#   export GEMINI_API_KEY="API_KEY_ANDA"
-# atau lewat st.secrets di Streamlit Cloud
+# Export GEMINI_API_KEY="API_KEY_ANDA"
+# Atau lewat st.secrets di Streamlit Cloud
 
 # 5. Jalankan aplikasi
 streamlit run app.py

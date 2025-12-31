@@ -68,8 +68,8 @@ Fokusnya adalah membantu tenaga kesehatan, pengelola program, dan pengambil kebi
 - 🎨 **Tampilan Modern dengan Tema Dark & Light**
   - Pilihan **tema Dark** dan **Light** yang dapat diubah dari sidebar
   - Desain UI dengan:
-    - Kartu metrik bergaya _soft 3D_
-    - Hero section dengan efek _depth_ dan visual orbit
+    - Kartu metrik
+    - Hero section
     - Kontras warna yang nyaman untuk penggunaan lama
     - Layout yang rapi dan mudah dibaca
 
@@ -82,7 +82,7 @@ Fokusnya adalah membantu tenaga kesehatan, pengelola program, dan pengambil kebi
 - **Pandas & NumPy** – untuk pemrosesan dan analisis data
 - **scikit-learn** – untuk model Machine Learning (Random Forest)
 - **Google Generative AI (Gemini)** – untuk Asisten AI (analisis dan rekomendasi)
-- **CSS kustom** – untuk tema dark/light dan efek tampilan 3D yang lembut
+- **CSS kustom** – untuk tema dark/light dan efek tampilan yang lembut
 
 ---
 

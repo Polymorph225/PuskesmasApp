@@ -1,7 +1,9 @@
 streamlit
 pandas
 numpy
-scikit-learn
-google-genai
 openpyxl
-xlrd==2.0.1
+xlrd
+statsmodels
+google-genai
+scikit-learn
+matplotlib

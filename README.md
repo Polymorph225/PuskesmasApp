@@ -46,7 +46,7 @@ Fokusnya adalah membantu tenaga kesehatan, pengelola program, dan pengambil kebi
   - Matriks poli × pembiayaan untuk melihat pola penggunaan layanan dan jaminan kesehatan
 
 - 🧠 **Model Machine Learning untuk Risiko Lonjakan Kasus**
-  - Menggunakan **RandomForestClassifier** untuk memodelkan risiko **lonjakan kasus** per bulan pada diagnosa/poli tertentu
+  - Menggunakan **XGBoost** untuk memodelkan risiko **lonjakan kasus** per bulan pada diagnosa/poli tertentu
   - Definisi lonjakan berbasis **persentil historis** (dapat diatur oleh pengguna)
   - Menampilkan:
     - Tren historis kunjungan per bulan
@@ -80,7 +80,7 @@ Fokusnya adalah membantu tenaga kesehatan, pengelola program, dan pengambil kebi
 - **Python**
 - **Streamlit** – untuk UI dashboard interaktif
 - **Pandas & NumPy** – untuk pemrosesan dan analisis data
-- **scikit-learn** – untuk model Machine Learning (Random Forest)
+- **scikit-learn** – untuk model Machine Learning (XGBoost)
 - **Google Generative AI (Gemini)** – untuk Asisten AI (analisis dan rekomendasi)
 - **CSS kustom** – untuk tema dark/light dan efek tampilan yang lembut
 

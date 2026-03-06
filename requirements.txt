@@ -6,3 +6,4 @@ xlrd
 google-genai
 scikit-learn
 xgboost
+plotly

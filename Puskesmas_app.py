@@ -3,12 +3,13 @@ import pandas as pd
 import numpy as np
 import os
 import re
+import plotly.express as px  # Library untuk peta interaktif
 
 # Library Machine Learning & AI
 from google import genai
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
-from xgboost import XGBClassifier  # <--- Menggunakan XGBoost
+from xgboost import XGBClassifier
 
 # ========== KONFIGURASI HALAMAN ==========
 st.set_page_config(
@@ -320,6 +321,79 @@ def page_penyakit(df_filtered, filter_info):
         top_n = st.slider("Jumlah diagnosa", 5, 20, 10)
         st.bar_chart(df_filtered["diagnosa"].value_counts().head(top_n))
 
+def page_peta_persebaran(df_filtered, filter_info):
+    st.subheader("🗺️ Peta Persebaran Penyakit")
+    show_active_filters(filter_info)
+    
+    if df_filtered is None or len(df_filtered) == 0:
+        st.warning("⚠️ Data kosong.")
+        return
+        
+    if "desa" not in df_filtered.columns or "diagnosa" not in df_filtered.columns:
+        st.error("❌ Kolom 'desa' atau 'diagnosa' tidak ditemukan dalam data.")
+        return
+
+    # Pilih Penyakit untuk divisualisasikan
+    top_penyakit = df_filtered["diagnosa"].value_counts().head(20).index.tolist()
+    pilihan_penyakit = st.selectbox("Pilih Diagnosa Penyakit untuk dipetakan:", options=["-- Semua Penyakit (Top 10) --"] + top_penyakit)
+
+    # Filter data berdasarkan penyakit yang dipilih
+    if pilihan_penyakit != "-- Semua Penyakit (Top 10) --":
+        df_map = df_filtered[df_filtered["diagnosa"] == pilihan_penyakit].copy()
+    else:
+        # Jika pilih semua, ambil 10 penyakit teratas agar peta tidak terlalu berat
+        top_10 = df_filtered["diagnosa"].value_counts().head(10).index.tolist()
+        df_map = df_filtered[df_filtered["diagnosa"].isin(top_10)].copy()
+
+    # Agregasi data: Hitung jumlah kasus per desa dan diagnosa
+    df_grouped = df_map.groupby(["desa", "diagnosa"]).size().reset_index(name="jumlah_kasus")
+
+    # --- MEMBUAT KOORDINAT DUMMY (SEMENTARA) ---
+    # Catatan: Di real project, gabungkan (merge) data ini dengan database koordinat desa asli.
+    unique_desas = df_grouped["desa"].unique()
+    np.random.seed(42) # Agar koordinat dummy konsisten
+    
+    # Titik tengah disesuaikan mendekati area Bojonegoro, Jawa Timur
+    center_lat, center_lon = -7.1509, 111.8817 
+    
+    # Generate koordinat acak dengan sebaran sekitar radius kecamatan
+    dummy_lats = center_lat + (np.random.rand(len(unique_desas)) - 0.5) * 0.1
+    dummy_lons = center_lon + (np.random.rand(len(unique_desas)) - 0.5) * 0.1
+    
+    # Map nama desa ke koordinat
+    coord_dict = {desa: (lat, lon) for desa, lat, lon in zip(unique_desas, dummy_lats, dummy_lons)}
+    
+    df_grouped["latitude"] = df_grouped["desa"].map(lambda x: coord_dict[x][0])
+    df_grouped["longitude"] = df_grouped["desa"].map(lambda x: coord_dict[x][1])
+    # --------------------------------------------
+
+    st.markdown(f"**Menampilkan persebaran pasien untuk:** `{pilihan_penyakit}`")
+    st.info("💡 *Catatan: Titik koordinat pada peta ini masih berupa simulasi. Untuk akurasi pada PuskesmasApp, integrasikan dengan master data bujur & lintang desa terkait.*")
+
+    # Render Peta dengan Plotly
+    fig = px.scatter_mapbox(
+        df_grouped, 
+        lat="latitude", 
+        lon="longitude", 
+        color="diagnosa",
+        size="jumlah_kasus",
+        hover_name="desa",
+        hover_data={"latitude": False, "longitude": False, "diagnosa": True, "jumlah_kasus": True},
+        color_discrete_sequence=px.colors.qualitative.Pastel,
+        zoom=10, 
+        height=500
+    )
+    
+    fig.update_layout(mapbox_style="open-street-map")
+    fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Tampilkan tabel detail di bawah peta
+    with st.expander("Lihat Detail Tabel Kasus per Desa"):
+        st.dataframe(df_grouped[["desa", "diagnosa", "jumlah_kasus"]].sort_values(by="jumlah_kasus", ascending=False), use_container_width=True)
+
+
 def page_pembiayaan(df_filtered, filter_info):
     st.subheader("💳 Analisis Pembiayaan")
     if df_filtered is None or "pembiayaan" not in df_filtered.columns: return
@@ -481,6 +555,7 @@ def main():
     st.sidebar.markdown("---")
     page = st.sidebar.radio("Navigasi", [
         "Ringkasan Umum", "Analisis Kunjungan", "Analisis Penyakit", 
+        "Peta Persebaran", # Menu baru ditambahkan di sini
         "Analisis Pembiayaan", "Data & Unduhan", "Kualitas Data", 
         "Prediksi ML", "Asisten AI"
     ])
@@ -488,6 +563,7 @@ def main():
     if page == "Ringkasan Umum": page_overview(df_filtered, filter_info)
     elif page == "Analisis Kunjungan": page_kunjungan(df_filtered, filter_info)
     elif page == "Analisis Penyakit": page_penyakit(df_filtered, filter_info)
+    elif page == "Peta Persebaran": page_peta_persebaran(df_filtered, filter_info) # Memanggil fungsi peta
     elif page == "Analisis Pembiayaan": page_pembiayaan(df_filtered, filter_info)
     elif page == "Data & Unduhan": page_data(df_filtered, filter_info)
     elif page == "Kualitas Data": page_quality(df_filtered)

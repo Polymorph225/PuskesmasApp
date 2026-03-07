@@ -584,6 +584,8 @@ def page_ml(df_filtered, filter_info):
         risk = next_week["prob_lonjakan"]
         minggu_str = next_week["periode"].strftime("%d %b %Y")
 
+        st.area_chart(future_df.set_index("periode")["prob_lonjakan"], color="#ff4b4b", height=200)
+
 def page_data(df_filtered, filter_info):
     st.subheader("📄 Data & Unduhan")
     if df_filtered is None: return
@@ -641,4 +643,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

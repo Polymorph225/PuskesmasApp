@@ -4,12 +4,11 @@ import numpy as np
 import os
 import re
 import plotly.express as px
+import plotly.graph_objects as go  # Tambahan untuk grafik Prophet yang lebih rapi
 
 # Library Machine Learning & AI
 from google import genai
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score
-from xgboost import XGBClassifier
+from prophet import Prophet  # Menggunakan Facebook Prophet
 
 # ========== KONFIGURASI HALAMAN ==========
 st.set_page_config(
@@ -333,22 +332,18 @@ def page_peta_persebaran(df_filtered, filter_info):
         st.error("❌ Kolom 'desa' atau 'diagnosa' tidak ditemukan dalam data.")
         return
 
-    # Pilih Penyakit untuk divisualisasikan
     top_penyakit = df_filtered["diagnosa"].value_counts().head(20).index.tolist()
     pilihan_penyakit = st.selectbox("Pilih Diagnosa Penyakit untuk dipetakan:", options=["-- Semua Penyakit (Top 10) --"] + top_penyakit)
 
-    # Filter data berdasarkan penyakit yang dipilih
     if pilihan_penyakit != "-- Semua Penyakit (Top 10) --":
         df_map = df_filtered[df_filtered["diagnosa"] == pilihan_penyakit].copy()
     else:
-        # Jika pilih semua, ambil 10 penyakit teratas
         top_10 = df_filtered["diagnosa"].value_counts().head(10).index.tolist()
         df_map = df_filtered[df_filtered["diagnosa"].isin(top_10)].copy()
 
-    # Agregasi data: Hitung jumlah kasus per desa dan diagnosa
     df_grouped = df_map.groupby(["desa", "diagnosa"]).size().reset_index(name="jumlah_kasus")
 
-    # --- PEMETAAN KOORDINAT DESA KECAMATAN PURWOSARI ---
+    # KOORDINAT DESA KECAMATAN PURWOSARI
     koordinat_desa = {
         "Donan": (-7.215046, 111.635988),
         "Gapluk": (-7.200003, 111.662517),
@@ -364,22 +359,17 @@ def page_peta_persebaran(df_filtered, filter_info):
         "Tlatah": (-7.213808, 111.696004)
     }
 
-    # Koordinat default jika desa di luar Kecamatan Purwosari (Pusat Kota Bojonegoro)
     koordinat_default = (-7.1509, 111.8817)
 
     def get_koordinat(nama_desa):
-        # Format teks menjadi Title Case agar cocok dengan dictionary
         desa_bersih = str(nama_desa).strip().title()
         return koordinat_desa.get(desa_bersih, koordinat_default)
 
-    # Terapkan fungsi koordinat ke dataframe
     df_grouped["latitude"] = df_grouped["desa"].apply(lambda x: get_koordinat(x)[0])
     df_grouped["longitude"] = df_grouped["desa"].apply(lambda x: get_koordinat(x)[1])
-    # ----------------------------------------------------
 
     st.markdown(f"**Menampilkan persebaran pasien untuk:** `{pilihan_penyakit}`")
 
-    # Render Peta dengan Plotly
     fig = px.scatter_mapbox(
         df_grouped, 
         lat="latitude", 
@@ -389,17 +379,15 @@ def page_peta_persebaran(df_filtered, filter_info):
         hover_name="desa",
         hover_data={"latitude": False, "longitude": False, "diagnosa": True, "jumlah_kasus": True},
         color_discrete_sequence=px.colors.qualitative.Pastel,
-        zoom=11.5, # Di-zoom lebih dekat untuk memperjelas area kecamatan
-        center={"lat": -7.218, "lon": 111.675}, # Pusatkan pandangan awal peta di area Purwosari
+        zoom=11.5, 
+        center={"lat": -7.218, "lon": 111.675}, 
         height=550
     )
     
     fig.update_layout(mapbox_style="open-street-map")
     fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
-    
     st.plotly_chart(fig, use_container_width=True)
     
-    # Tampilkan tabel detail di bawah peta
     with st.expander("Lihat Detail Tabel Kasus per Desa"):
         st.dataframe(df_grouped[["desa", "diagnosa", "jumlah_kasus"]].sort_values(by="jumlah_kasus", ascending=False), use_container_width=True)
 
@@ -408,9 +396,9 @@ def page_pembiayaan(df_filtered, filter_info):
     if df_filtered is None or "pembiayaan" not in df_filtered.columns: return
     st.bar_chart(df_filtered["pembiayaan"].value_counts())
 
-# ================== HALAMAN ML DENGAN XGBOOST (DIOPTIMASI) ==================
+# ================== HALAMAN ML DENGAN FACEBOOK PROPHET ==================
 def page_ml(df_filtered, filter_info):
-    st.subheader("🔮 Prediksi Tren (XGBoost)")
+    st.subheader("📈 Prediksi & Peramalan Tren (Facebook Prophet)")
     show_active_filters(filter_info)
 
     if df_filtered is None or len(df_filtered) == 0:
@@ -421,7 +409,7 @@ def page_ml(df_filtered, filter_info):
         st.error("❌ Kolom 'tanggal_kunjungan' tidak ditemukan.")
         return
 
-    # Filter item spesifik langsung untuk mempercepat proses
+    # Filter data ML
     df_ml = df_filtered.copy()
     if not pd.api.types.is_datetime64_any_dtype(df_ml["tanggal_kunjungan"]):
         df_ml["tanggal_kunjungan"] = pd.to_datetime(df_ml["tanggal_kunjungan"], errors="coerce")
@@ -431,14 +419,13 @@ def page_ml(df_filtered, filter_info):
         st.warning("⚠️ Data tanggal tidak valid.")
         return
 
-    # Ambil tanggal terakhir dari ketersediaan data
     max_date = df_ml["tanggal_kunjungan"].max().date()
 
     # UI Pengaturan
     with st.container():
         col_set1, col_set2, col_set3 = st.columns([1, 1, 1])
         with col_set1:
-            st.info("💡 **Model:** Menggunakan XGBoost Classifier (Pola Mingguan).")
+            st.info("💡 **Model:** Menggunakan Facebook Prophet (Time-Series Forecasting).")
             fokus = st.radio("Analisis:", ["Diagnosa Penyakit", "Poli / Unit"], horizontal=True)
             kolom_fokus = "diagnosa" if fokus == "Diagnosa Penyakit" else "poli"
         
@@ -448,111 +435,104 @@ def page_ml(df_filtered, filter_info):
             pilihan_item = st.selectbox(f"Pilih {fokus}:", options=top_items.index.tolist())
             
         with col_set3:
-            # Fitur Baru: Pilihan Rentang Tanggal Kalender (Maks 1 Tahun ke Depan)
             target_date = st.date_input(
                 "Prediksi Sampai Tanggal:", 
-                value=max_date + pd.Timedelta(days=30), # Default otomatis 1 bulan kedepan
+                value=max_date + pd.Timedelta(days=30), 
                 min_value=max_date + pd.Timedelta(days=1),
-                max_value=max_date + pd.Timedelta(days=365) # Maksimal 1 tahun kedepan
+                max_value=max_date + pd.Timedelta(days=365) # Maks 1 tahun
             )
 
     df_item = df_ml[df_ml[kolom_fokus] == pilihan_item].copy()
     
     if len(df_item) < 10:
-        st.error("❌ Data terlalu sedikit (< 10 pasien) untuk dipelajari oleh AI.")
+        st.error("❌ Data terlalu sedikit (< 10 pasien) untuk dipelajari oleh AI Prophet.")
         return
 
-    # --- PENYESUAIAN PENTING ---
-    # Ubah Agregasi menjadi Mingguan agar AI punya cukup pola (~52 baris per tahun) & pemrosesan jauh lebih cepat.
-    df_item["periode"] = df_item["tanggal_kunjungan"].dt.to_period("W").dt.start_time
-    weekly = df_item.groupby("periode").size().reset_index(name="jumlah_kunjungan").sort_values("periode")
+    # --- PERSIAPAN DATA UNTUK PROPHET ---
+    # Prophet membutuhkan format dataframe dengan nama kolom spesifik: 'ds' (tanggal) dan 'y' (nilai target)
+    weekly = df_item.groupby(pd.Grouper(key="tanggal_kunjungan", freq="W-MON")).size().reset_index(name="jumlah")
+    df_prophet = weekly.rename(columns={"tanggal_kunjungan": "ds", "jumlah": "y"})
 
-    # Grafik Historis
+    # Inisialisasi dan Training Model Prophet
+    with st.spinner('AI sedang memproses pola peramalan...'):
+        # Menyesuaikan parameter agar cocok dengan fluktuasi data medis mingguan
+        model = Prophet(yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False, interval_width=0.80)
+        model.fit(df_prophet)
+
+        # Menghitung durasi ke masa depan berdasarkan pilihan pengguna
+        last_date = df_prophet["ds"].max().date()
+        target_dt = pd.to_datetime(target_date).date()
+        delta_days = (target_dt - last_date).days
+        periods_ahead = max(1, delta_days // 7)
+
+        # Generate dataframe untuk masa depan & lakukan prediksi
+        future = model.make_future_dataframe(periods=periods_ahead, freq='W-MON')
+        forecast = model.predict(future)
+
+    # --- VISUALISASI HASIL DENGAN PLOTLY ---
     st.markdown("---")
-    st.markdown(f"### 📈 Riwayat Kunjungan Mingguan: **{pilihan_item}**")
-    st.line_chart(weekly.set_index("periode")["jumlah_kunjungan"], color="#2563eb")
+    st.markdown(f"### 📈 Grafik Peramalan Kunjungan: **{pilihan_item}**")
 
-    # --- PROSES ML (XGBOOST) ---
-    weekly["tahun"] = weekly["periode"].dt.year
-    weekly["bulan"] = weekly["periode"].dt.month
-    weekly["minggu"] = weekly["periode"].dt.isocalendar().week.astype(int)
-    weekly["t"] = range(len(weekly))
-    
-    # Target: Lonjakan (Threshold 75th percentile)
-    threshold = np.percentile(weekly["jumlah_kunjungan"], 75)
-    weekly["is_lonjakan"] = (weekly["jumlah_kunjungan"] >= threshold).astype(int)
+    # Membuat Grafik Plotly yang Interaktif
+    fig = go.Figure()
 
-    X = weekly[["t", "tahun", "bulan", "minggu"]]
-    y = weekly["is_lonjakan"]
+    # Tambahkan Data Historis Aktual (Garis Biru)
+    fig.add_trace(go.Scatter(
+        x=df_prophet['ds'], y=df_prophet['y'], 
+        mode='lines+markers', name='Data Aktual',
+        line=dict(color='#2563eb', width=2)
+    ))
 
-    if y.nunique() < 2:
-        st.warning("ℹ️ Data terlalu stabil (tidak ada pola lonjakan drastis), AI tidak mendeteksi anomali.")
-        return
+    # Tambahkan Garis Prediksi Masa Depan (Garis Merah Putus-putus)
+    forecast_future = forecast[forecast['ds'] > pd.to_datetime(last_date)]
+    fig.add_trace(go.Scatter(
+        x=forecast_future['ds'], y=forecast_future['yhat'], 
+        mode='lines+markers', name='Prediksi Masa Depan',
+        line=dict(color='#ef4444', width=3, dash='dash')
+    ))
 
-    # Inisialisasi Model XGBoost yang Dioptimasi (Cepat & Ringan)
-    model = XGBClassifier(
-        n_estimators=50,       
-        learning_rate=0.1,
-        max_depth=3,
-        objective='binary:logistic',
-        eval_metric='logloss',
-        random_state=42,
-        n_jobs=-1  # Eksekusi full-core agar prediksi instan            
+    # Tambahkan Area Ketidakpastian/Confidence Interval (Bayangan Merah)
+    fig.add_trace(go.Scatter(
+        x=forecast_future['ds'].tolist() + forecast_future['ds'].tolist()[::-1],
+        y=forecast_future['yhat_upper'].tolist() + forecast_future['yhat_lower'].tolist()[::-1],
+        fill='toself', fillcolor='rgba(239, 68, 68, 0.2)', 
+        line=dict(color='rgba(255,255,255,0)'),
+        name='Rentang Toleransi/Batas Atas-Bawah',
+        hoverinfo="skip"
+    ))
+
+    fig.update_layout(
+        xaxis_title="Periode Waktu", 
+        yaxis_title="Jumlah Kunjungan/Pasien",
+        hovermode="x unified",
+        margin=dict(l=0, r=0, t=30, b=0),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
 
-    # Validasi & Training
-    if len(weekly) >= 12:
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42, stratify=y)
-        model.fit(X_train, y_train)
-        acc = accuracy_score(y_test, model.predict(X_test))
-        st.caption(f"📊 Tingkat Kepercayaan AI (Accuracy): **{acc:.2%}**")
-    else:
-        model.fit(X, y)
-    
-    # Train Full Data untuk Prediksi
-    model.fit(X, y)
+    st.plotly_chart(fig, use_container_width=True)
 
-    # Prediksi Masa Depan Sesuai Pilihan Tanggal
-    last_period = weekly["periode"].max()
+    # --- KESIMPULAN METRIK HASIL ---
+    st.markdown("### 📢 Kesimpulan Estimasi Terdekat (Minggu Depan)")
     
-    # Generate rentang tanggal dari minggu depan sampai target_date
-    future_periods = pd.date_range(start=last_period + pd.Timedelta(days=7), end=pd.to_datetime(target_date), freq="W")
-    
-    # Jika user memilih tanggal yang terlalu dekat (< 1 minggu)
-    if len(future_periods) == 0:
-        future_periods = pd.DatetimeIndex([last_period + pd.Timedelta(days=7)])
+    if not forecast_future.empty:
+        next_week = forecast_future.iloc[0]
+        tgl_minggu_depan = next_week["ds"].strftime("%d %B %Y")
         
-    future_df = pd.DataFrame({"periode": future_periods})
-    future_df["tahun"] = future_df["periode"].dt.year
-    future_df["bulan"] = future_df["periode"].dt.month
-    future_df["minggu"] = future_df["periode"].dt.isocalendar().week.astype(int)
-    future_df["t"] = range(weekly["t"].max() + 1, weekly["t"].max() + 1 + len(future_df))
-    
-    # Probabilitas Lonjakan
-    future_df["prob_lonjakan"] = model.predict_proba(future_df[["t", "tahun", "bulan", "minggu"]])[:, 1]
+        # Prophet dapat memprediksi nilai negatif pada tren menurun yang ekstrim, batasi nilai minimum ke 0
+        est_kunjungan = max(0, int(round(next_week["yhat"])))
+        batas_bawah = max(0, int(round(next_week["yhat_lower"])))
+        batas_atas = max(0, int(round(next_week["yhat_upper"])))
 
-    # --- HASIL ---
-    st.markdown(f"### 📢 Prediksi Risiko Hingga: **{pd.to_datetime(target_date).strftime('%d %B %Y')}**")
-    
-    # Highlight Minggu Depan (Terdekat)
-    next_week = future_df.iloc[0]
-    risk = next_week["prob_lonjakan"]
-    minggu_str = next_week["periode"].strftime("%d %b %Y")
-    
-    col_alert, col_metric = st.columns([2, 1])
-    with col_alert:
-        if risk >= 0.7:
-            st.error(f"🚨 **WASPADA (Pekan {minggu_str})**: Risiko Lonjakan TINGGI ({risk:.0%})")
-        elif risk >= 0.4:
-            st.warning(f"⚡ **HATI-HATI (Pekan {minggu_str})**: Risiko Lonjakan SEDANG ({risk:.0%})")
-        else:
-            st.success(f"✅ **AMAN (Pekan {minggu_str})**: Risiko Rendah ({risk:.0%})")
+        col_alert, col_metric1, col_metric2 = st.columns([2, 1, 1])
+        with col_alert:
+            st.info(f"📆 **Pada pekan yang berakhir {tgl_minggu_depan}**, model AI Prophet meramalkan akan ada sekitar **{est_kunjungan} kasus/kunjungan** baru untuk **{pilihan_item}**.")
             
-    with col_metric:
-        st.metric("Probabilitas Lonjakan", f"{risk:.1%}", delta="Pekan Depan")
-
-    # Grafik Area Prediksi
-    st.area_chart(future_df.set_index("periode")["prob_lonjakan"], color="#ff4b4b", height=200)
+        with col_metric1:
+            st.metric("Estimasi Kunjungan", f"{est_kunjungan} Pasien")
+        with col_metric2:
+            st.metric("Rentang Ketidakpastian", f"{batas_bawah} - {batas_atas} Pasien", delta_color="off")
+    else:
+        st.info("Tanggal prediksi terlalu dekat dengan data terakhir.")
 
 def page_data(df_filtered, filter_info):
     st.subheader("📄 Data & Unduhan")

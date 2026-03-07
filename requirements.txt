@@ -1,9 +1,6 @@
 streamlit
 pandas
 numpy
-openpyxl
-xlrd
-google-genai
-scikit-learn
-xgboost
 plotly
+prophet
+google-genai

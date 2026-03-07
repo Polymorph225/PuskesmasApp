@@ -24,20 +24,14 @@ def inject_custom_css():
     st.markdown(
         """
         <style>
-        /* Global background */
         body { background-color: #f5f7fb; }
-        
-        /* Layout adjustments */
         .block-container {
             padding-top: 1.5rem;
             padding-bottom: 3rem;
             padding-left: 2rem;
             padding-right: 2rem;
         }
-        
         h1 { font-weight: 700 !important; }
-        
-        /* Metric cards */
         div[data-testid="metric-container"] {
             padding: 0.75rem 1rem;
             border-radius: 0.75rem;
@@ -45,16 +39,11 @@ def inject_custom_css():
             border: 1px solid rgba(148, 163, 184, 0.6);
             box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
         }
-        
-        /* Sidebar */
         section[data-testid="stSidebar"] { background-color: #f3f4f6; }
-        
-        /* DataFrame styling */
         div[data-testid="stDataFrame"] {
             border-radius: 0.5rem;
             border: 1px solid rgba(148, 163, 184, 0.4);
         }
-        
         hr { margin: 0.75rem 0 1rem 0; }
         </style>
         """,
@@ -333,30 +322,25 @@ def page_peta_persebaran(df_filtered, filter_info):
         st.error("❌ Kolom 'desa' atau 'diagnosa' tidak ditemukan dalam data.")
         return
 
-    # Pilih Penyakit untuk divisualisasikan
     top_penyakit = df_filtered["diagnosa"].value_counts().head(20).index.tolist()
     pilihan_penyakit = st.selectbox("Pilih Diagnosa Penyakit untuk dipetakan:", options=["-- Semua Penyakit (Top 10) --"] + top_penyakit)
 
-    # Filter data berdasarkan penyakit yang dipilih
     if pilihan_penyakit != "-- Semua Penyakit (Top 10) --":
         df_map = df_filtered[df_filtered["diagnosa"] == pilihan_penyakit].copy()
     else:
-        # Jika pilih semua, ambil 10 penyakit teratas
         top_10 = df_filtered["diagnosa"].value_counts().head(10).index.tolist()
         df_map = df_filtered[df_filtered["diagnosa"].isin(top_10)].copy()
 
-    # Agregasi data: Hitung jumlah kasus per desa dan diagnosa
     df_grouped = df_map.groupby(["desa", "diagnosa"]).size().reset_index(name="jumlah_kasus")
 
-    # --- PEMETAAN KOORDINAT DESA KECAMATAN PURWOSARI ---
     koordinat_desa = {
         "Donan": (-7.215046, 111.635988),
         "Gapluk": (-7.200003, 111.662517),
-        "Kaliombo": (-7.225713, 111.687533),
+        "Kaliombo": (-7.243656, 111.686128),
         "Kuniran": (-7.223605, 111.655825),
         "Ngrejeng": (-7.222318, 111.706618),
         "Pelem": (-7.237117, 111.699898),
-        "Pojok": (-7.186336, 111.672242),
+        "Pojok": (-7.237117, 111.699898),
         "Punggur": (-7.203616, 111.682271),
         "Purwosari": (-7.176333, 111.662109),
         "Sedahkidul": (-7.196343, 111.679325),
@@ -364,22 +348,17 @@ def page_peta_persebaran(df_filtered, filter_info):
         "Tlatah": (-7.213808, 111.696004)
     }
 
-    # Koordinat default jika desa di luar Kecamatan Purwosari (Pusat Kota Bojonegoro)
     koordinat_default = (-7.1509, 111.8817)
 
     def get_koordinat(nama_desa):
-        # Format teks menjadi Title Case agar cocok dengan dictionary
         desa_bersih = str(nama_desa).strip().title()
         return koordinat_desa.get(desa_bersih, koordinat_default)
 
-    # Terapkan fungsi koordinat ke dataframe
     df_grouped["latitude"] = df_grouped["desa"].apply(lambda x: get_koordinat(x)[0])
     df_grouped["longitude"] = df_grouped["desa"].apply(lambda x: get_koordinat(x)[1])
-    # ----------------------------------------------------
 
     st.markdown(f"**Menampilkan persebaran pasien untuk:** `{pilihan_penyakit}`")
 
-    # Render Peta dengan Plotly
     fig = px.scatter_mapbox(
         df_grouped, 
         lat="latitude", 
@@ -389,17 +368,15 @@ def page_peta_persebaran(df_filtered, filter_info):
         hover_name="desa",
         hover_data={"latitude": False, "longitude": False, "diagnosa": True, "jumlah_kasus": True},
         color_discrete_sequence=px.colors.qualitative.Pastel,
-        zoom=11.5, # Di-zoom lebih dekat untuk memperjelas area kecamatan
-        center={"lat": -7.218, "lon": 111.675}, # Pusatkan pandangan awal peta di area Purwosari
+        zoom=11.5, 
+        center={"lat": -7.218, "lon": 111.675}, 
         height=550
     )
     
     fig.update_layout(mapbox_style="open-street-map")
     fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
-    
     st.plotly_chart(fig, use_container_width=True)
     
-    # Tampilkan tabel detail di bawah peta
     with st.expander("Lihat Detail Tabel Kasus per Desa"):
         st.dataframe(df_grouped[["desa", "diagnosa", "jumlah_kasus"]].sort_values(by="jumlah_kasus", ascending=False), use_container_width=True)
 
@@ -408,7 +385,7 @@ def page_pembiayaan(df_filtered, filter_info):
     if df_filtered is None or "pembiayaan" not in df_filtered.columns: return
     st.bar_chart(df_filtered["pembiayaan"].value_counts())
 
-# ================== HALAMAN ML DENGAN XGBOOST ==================
+# ================== HALAMAN ML DENGAN XGBOOST (DIOPTIMASI) ==================
 def page_ml(df_filtered, filter_info):
     st.subheader("🔮 Prediksi Tren (XGBoost)")
     show_active_filters(filter_info)
@@ -421,31 +398,37 @@ def page_ml(df_filtered, filter_info):
         st.error("❌ Kolom 'tanggal_kunjungan' tidak ditemukan.")
         return
 
-    # Persiapan Data
-    df = df_filtered.copy()
-    df["tanggal_kunjungan"] = pd.to_datetime(df["tanggal_kunjungan"], errors="coerce")
-    df = df.dropna(subset=["tanggal_kunjungan"])
-
     # UI Pengaturan
     with st.container():
-        col_set1, col_set2 = st.columns([1, 2])
+        col_set1, col_set2, col_set3 = st.columns([1, 1, 1])
         with col_set1:
-            st.info("💡 **Model:** Menggunakan XGBoost Classifier untuk deteksi anomali lonjakan.")
+            st.info("💡 **Model:** Menggunakan XGBoost Classifier untuk deteksi lonjakan.")
             fokus = st.radio("Analisis:", ["Diagnosa Penyakit", "Poli / Unit"], horizontal=True)
             kolom_fokus = "diagnosa" if fokus == "Diagnosa Penyakit" else "poli"
         
         with col_set2:
-            if kolom_fokus not in df.columns: return
-            top_items = df[kolom_fokus].value_counts().head(30)
+            if kolom_fokus not in df_filtered.columns: return
+            top_items = df_filtered[kolom_fokus].value_counts().head(30)
             pilihan_item = st.selectbox(f"Pilih {fokus}:", options=top_items.index.tolist())
+            
+        with col_set3:
+            # Fitur Baru: Pilihan Rentang Prediksi (Bulan)
+            horizon = st.slider("Periode Prediksi (Bulan ke depan):", min_value=1, max_value=12, value=6)
 
-    # Filter item spesifik
-    df_item = df[df[kolom_fokus] == pilihan_item].copy()
+    # Filter item spesifik langsung untuk mempercepat proses (tidak perlu meng-copy seluruh dataframe)
+    df_item = df_filtered[df_filtered[kolom_fokus] == pilihan_item].copy()
+    
     if len(df_item) < 10:
-        st.error("❌ Data terlalu sedikit (< 10 pasien).")
+        st.error("❌ Data terlalu sedikit (< 10 pasien) untuk dipelajari oleh AI.")
         return
 
-    # Agregasi Bulanan
+    # Memastikan format tanggal (Hanya dijalankan pada data yang sudah difilter agar ringan)
+    if not pd.api.types.is_datetime64_any_dtype(df_item["tanggal_kunjungan"]):
+        df_item["tanggal_kunjungan"] = pd.to_datetime(df_item["tanggal_kunjungan"], errors="coerce")
+    
+    df_item = df_item.dropna(subset=["tanggal_kunjungan"])
+
+    # Agregasi Bulanan yang Cepat
     df_item["periode"] = df_item["tanggal_kunjungan"].dt.to_period("M").dt.to_timestamp()
     monthly = df_item.groupby("periode").size().reset_index(name="jumlah_kunjungan").sort_values("periode")
 
@@ -467,17 +450,18 @@ def page_ml(df_filtered, filter_info):
     y = monthly["is_lonjakan"]
 
     if y.nunique() < 2:
-        st.warning("ℹ️ Data terlalu stabil, tidak ada pola lonjakan untuk dipelajari.")
+        st.warning("ℹ️ Data terlalu stabil (tidak ada pola lonjakan drastis), AI tidak mendeteksi anomali.")
         return
 
-    # Inisialisasi Model XGBoost
+    # Inisialisasi Model XGBoost yang Dioptimasi (Cepat & Ringan)
     model = XGBClassifier(
-        n_estimators=100,
+        n_estimators=50,       # Kurangi jumlah tree agar kalkulasi instan (50 cukup untuk data kecil)
         learning_rate=0.1,
         max_depth=3,
         objective='binary:logistic',
         eval_metric='logloss',
-        random_state=42
+        random_state=42,
+        n_jobs=-1              # Gunakan semua core CPU agar pemrosesan maksimal
     )
 
     # Validasi & Training
@@ -485,14 +469,14 @@ def page_ml(df_filtered, filter_info):
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42, stratify=y)
         model.fit(X_train, y_train)
         acc = accuracy_score(y_test, model.predict(X_test))
-        st.caption(f"📊 Akurasi Model (Test Set): **{acc:.2%}**")
+        st.caption(f"📊 Tingkat Kepercayaan AI (Accuracy): **{acc:.2%}**")
     
     # Train Full Data
     model.fit(X, y)
 
-    # Prediksi Masa Depan
+    # Prediksi Masa Depan Sesuai Pilihan Slider (Horizon)
     last_period = monthly["periode"].max()
-    future_periods = pd.date_range(start=last_period + pd.offsets.MonthBegin(1), periods=6, freq="MS")
+    future_periods = pd.date_range(start=last_period + pd.offsets.MonthBegin(1), periods=horizon, freq="MS")
     future_df = pd.DataFrame({"periode": future_periods})
     future_df["tahun"] = future_df["periode"].dt.year
     future_df["bulan"] = future_df["periode"].dt.month
@@ -502,9 +486,9 @@ def page_ml(df_filtered, filter_info):
     future_df["prob_lonjakan"] = model.predict_proba(future_df[["t", "tahun", "bulan"]])[:, 1]
 
     # --- HASIL ---
-    st.markdown("### 📢 Prediksi Risiko 6 Bulan Kedepan")
+    st.markdown(f"### 📢 Prediksi Risiko {horizon} Bulan Kedepan")
     
-    # Highlight Bulan Depan
+    # Highlight Bulan Depan (Terdekat)
     next_month = future_df.iloc[0]
     risk = next_month["prob_lonjakan"]
     bulan_str = next_month["periode"].strftime("%B %Y")
@@ -519,9 +503,9 @@ def page_ml(df_filtered, filter_info):
             st.success(f"✅ **AMAN ({bulan_str})**: Risiko Rendah ({risk:.0%})")
             
     with col_metric:
-        st.metric("Probabilitas", f"{risk:.1%}", delta="Bulan Depan")
+        st.metric("Probabilitas Lonjakan", f"{risk:.1%}", delta="Bulan Depan")
 
-    # Grafik Area
+    # Grafik Area Prediksi
     st.area_chart(future_df.set_index("periode")["prob_lonjakan"], color="#ff4b4b", height=200)
 
 def page_data(df_filtered, filter_info):
@@ -581,5 +565,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

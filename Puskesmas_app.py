@@ -578,12 +578,37 @@ def page_ml(df_filtered, filter_info):
             
             future_df["prob_lonjakan"] = model.predict_proba(future_df[["t", "tahun", "bulan", "minggu"]])[:, 1]
 
-        st.markdown(f"### 📢 Prediksi Risiko Hingga: **{pd.to_datetime(target_date).strftime('%d %B %Y')}**")
+        st.markdown(f"### 📢 Hasil Prediksi Risiko & Keterangan (Hingga {pd.to_datetime(target_date).strftime('%d %b %Y')})")
         
         next_week = future_df.iloc[0]
         risk = next_week["prob_lonjakan"]
         minggu_str = next_week["periode"].strftime("%d %b %Y")
+        
+        col_alert, col_metric = st.columns([2, 1])
+        with col_alert:
+            if risk >= 0.7:
+                st.error(f"🚨 **WASPADA (Pekan {minggu_str})**: Risiko Lonjakan TINGGI ({risk:.0%})")
+            elif risk >= 0.4:
+                st.warning(f"⚡ **HATI-HATI (Pekan {minggu_str})**: Risiko Lonjakan SEDANG ({risk:.0%})")
+            else:
+                st.success(f"✅ **AMAN (Pekan {minggu_str})**: Risiko Rendah ({risk:.0%})")
+                
+        with col_metric:
+            st.metric("Probabilitas Lonjakan", f"{risk:.1%}", delta="Pekan Depan")
 
+        # -- TAMBAHAN KETERANGAN PERSENTASE RISIKO --
+        with st.expander("ℹ️ Cara Membaca Persentase Risiko", expanded=True):
+            st.markdown(f"""
+            **Apa arti probabilitas lonjakan sebesar {risk:.1%}?**
+            Ini adalah tingkat keyakinan (probabilitas) AI bahwa pada minggu depan akan terjadi jumlah kasus yang berada **di atas batas normal** (melebihi *75th percentile* dari riwayat kasus biasanya).
+
+            **Panduan Kategori Risiko:**
+            - 🔴 **Tinggi (> 70%)**: Sangat mungkin terjadi lonjakan pasien secara signifikan. Faskes sangat disarankan untuk melakukan persiapan dini (seperti memastikan ketersediaan obat dan jadwal tenaga kesehatan).
+            - 🟡 **Sedang (40% - 70%)**: Terdapat potensi peningkatan kasus yang perlu dipantau lebih lanjut.
+            - 🟢 **Rendah (< 40%)**: Kondisi diprediksi akan stabil dan terkendali, tidak ada indikasi anomali/lonjakan kasus yang drastis.
+            """)
+
+        st.markdown("### 📉 Grafik Area Probabilitas")
         st.area_chart(future_df.set_index("periode")["prob_lonjakan"], color="#ff4b4b", height=200)
 
 def page_data(df_filtered, filter_info):

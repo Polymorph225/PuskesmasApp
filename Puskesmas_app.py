@@ -583,20 +583,6 @@ def page_ml(df_filtered, filter_info):
         next_week = future_df.iloc[0]
         risk = next_week["prob_lonjakan"]
         minggu_str = next_week["periode"].strftime("%d %b %Y")
-        
-        col_alert, col_metric = st.columns([2, 1])
-        with col_alert:
-            if risk >= 0.7:
-                st.error(f"🚨 **WASPADA (Pekan {minggu_str})**: Risiko Lonjakan TINGGI ({risk:.0%})")
-            elif risk >= 0.4:
-                st.warning(f"⚡ **HATI-HATI (Pekan {minggu_str})**: Risiko Lonjakan SEDANG ({risk:.0%})")
-            else:
-                st.success(f"✅ **AMAN (Pekan {minggu_str})**: Risiko Rendah ({risk:.0%})")
-                
-        with col_metric:
-            st.metric("Probabilitas Lonjakan", f"{risk:.1%}", delta="Pekan Depan")
-
-        st.area_chart(future_df.set_index("periode")["prob_lonjakan"], color="#ff4b4b", height=200)
 
 def page_data(df_filtered, filter_info):
     st.subheader("📄 Data & Unduhan")
@@ -655,3 +641,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

@@ -352,7 +352,7 @@ def page_peta_persebaran(df_filtered, filter_info):
     koordinat_desa = {
         "Donan": (-7.215046, 111.635988),
         "Gapluk": (-7.200003, 111.662517),
-        "Kaliombo": (-7.242530, 111.685072),
+        "Kaliombo": (-7.225713, 111.687533),
         "Kuniran": (-7.223605, 111.655825),
         "Ngrejeng": (-7.222318, 111.706618),
         "Pelem": (-7.237117, 111.699898),
@@ -581,4 +581,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 

@@ -262,7 +262,7 @@ def show_active_filters(filter_info):
         if v: chips.append(f"{k.title()}: {', '.join(map(str, v))}")
     if chips: st.caption("🎯 **Filter aktif:** " + " | ".join(chips))
 
-# ========= HALAMAN DASHBOARD =========
+# ========= HAL কতটা DASHBOARD =========
 
 def page_overview(df_filtered, filter_info):
     st.subheader("📌 Ringkasan Umum")
@@ -489,22 +489,27 @@ def page_ml(df_filtered, filter_info):
     )
     st.plotly_chart(fig, use_container_width=True)
 
-    st.markdown("### 📢 Kesimpulan Estimasi Terdekat (Minggu Depan)")
+    # ================= KESIMPULAN ESTIMASI (UPDATE) =================
+    st.markdown(f"### 📢 Kesimpulan Estimasi Hingga {pd.to_datetime(target_date).strftime('%d %B %Y')}")
     if not forecast_future.empty:
-        next_week = forecast_future.iloc[0]
-        tgl_minggu_depan = next_week["ds"].strftime("%d %B %Y")
+        # Menghitung total akumulasi kunjungan selama masa prediksi
+        total_estimasi = int(round(forecast_future["yhat"].clip(lower=0).sum()))
         
-        est_kunjungan = max(0, int(round(next_week["yhat"])))
-        batas_bawah = max(0, int(round(next_week["yhat_lower"])))
-        batas_atas = max(0, int(round(next_week["yhat_upper"])))
+        # Mengambil prediksi spesifik di titik akhir (minggu sesuai target tanggal yang dipilih user)
+        target_week = forecast_future.iloc[-1]
+        tgl_target_akhir = target_week["ds"].strftime("%d %B %Y")
+        
+        est_kunjungan_akhir = max(0, int(round(target_week["yhat"])))
+        batas_bawah_akhir = max(0, int(round(target_week["yhat_lower"])))
+        batas_atas_akhir = max(0, int(round(target_week["yhat_upper"])))
 
         col_alert, col_metric1, col_metric2 = st.columns([2, 1, 1])
         with col_alert:
-            st.info(f"📆 **Pada pekan yang berakhir {tgl_minggu_depan}**, diramalkan ada sekitar **{est_kunjungan} kunjungan** baru untuk **{pilihan_item}**.")
+            st.info(f"📆 Selama periode ke depan hingga **{tgl_target_akhir}**, AI memperkirakan akan ada **total akumulasi {total_estimasi} kunjungan/kasus** untuk **{pilihan_item}**. \n\nSementara itu, khusus pada pekan terakhir tersebut, diprediksi terdapat **{est_kunjungan_akhir} kunjungan** baru.")
         with col_metric1:
-            st.metric("Estimasi Kunjungan", f"{est_kunjungan} Pasien")
+            st.metric("Total Akumulasi Pasien", f"{total_estimasi} Pasien")
         with col_metric2:
-            st.metric("Rentang Toleransi", f"{batas_bawah} - {batas_atas} Pasien", delta_color="off")
+            st.metric("Estimasi Pekan Terakhir", f"{est_kunjungan_akhir} Pasien", help=f"Batas Bawah: {batas_bawah_akhir} | Batas Atas: {batas_atas_akhir}")
     else:
         st.info("Tanggal prediksi terlalu dekat dengan data terakhir.")
 

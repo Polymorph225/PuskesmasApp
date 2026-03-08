@@ -113,7 +113,3 @@ Aplikasi akan otomatis terbuka di *browser* Anda pada alamat `http://localhost:8
 Dikembangkan oleh peserta Latsar CPNS Tahun 2026.
 
 Untuk pertanyaan, masukan, atau kendala terkait aplikasi ini, silakan hubungi pengembang melalui repositori ini (buka *Issue* atau hubungi langsung secara internal di UPT Puskesmas Purwosari).
-
-```
-
-```

@@ -18,12 +18,12 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ========== TAMPILAN (CSS) ADAPTIF (LIGHT/DARK MODE) ==========
+# ========== TAMPILAN (CSS) ADAPTIF ==========
 def inject_custom_css():
     st.markdown(
         """
         <style>
-        /* Menggunakan variabel bawaan Streamlit agar merespon Light/Dark mode otomatis */
+        /* CSS Umum */
         .block-container {
             padding-top: 1.5rem;
             padding-bottom: 3rem;
@@ -46,6 +46,23 @@ def inject_custom_css():
         }
         
         hr { margin: 0.75rem 0 1rem 0; }
+        
+        /* ==============================================
+           TAMBAHAN: KELAS KHUSUS UNTUK TEKS ESTIMASI
+           ============================================== */
+        .highlight-estimasi {
+            color: var(--text-color); /* Warna bawaan (hitam di light mode) */
+            line-height: 1.5;
+            font-size: 1rem;
+        }
+        
+        /* Deteksi jika perangkat / browser dalam Dark Mode */
+        @media (prefers-color-scheme: dark) {
+            .highlight-estimasi {
+                color: #fde047 !important; /* Warna kuning menyala khusus Dark Mode */
+                text-shadow: 0px 0px 2px rgba(0,0,0,0.5); /* Sedikit bayangan agar makin jelas */
+            }
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -311,7 +328,7 @@ def page_penyakit(df_filtered, filter_info):
         top_n = st.slider("Jumlah diagnosa", 5, 20, 10)
         st.bar_chart(df_filtered["diagnosa"].value_counts().head(top_n))
 
-# ================== HALAMAN PETA (DIPERBARUI) ==================
+# ================== HALAMAN PETA ==================
 def page_peta_persebaran(df_filtered, filter_info):
     st.subheader("🗺️ Peta Persebaran Penyakit")
     show_active_filters(filter_info)
@@ -326,18 +343,13 @@ def page_peta_persebaran(df_filtered, filter_info):
 
     st.markdown("### 🔍 Filter Persebaran")
     
-    # Membagi kolom untuk input agar lebih rapi
     col_pilih_penyakit, col_pilih_tema = st.columns([3, 1])
-    
     with col_pilih_penyakit:
         top_penyakit = df_filtered["diagnosa"].value_counts().head(20).index.tolist()
         pilihan_penyakit = st.selectbox("Pilihan Diagnosa:", options=["-- Semua Penyakit (Top 10) --"] + top_penyakit)
-    
     with col_pilih_tema:
-        # Menambahkan fitur pilihan Tema Peta untuk adaptasi Dark Mode
         tema_peta = st.selectbox("Tema Peta:", ["Terang", "Gelap"])
 
-    # Mengatur gaya peta (Mapbox Style) berdasarkan pilihan pengguna
     map_style = "carto-darkmatter" if tema_peta == "Gelap" else "carto-positron"
 
     if pilihan_penyakit != "-- Semua Penyakit (Top 10) --":
@@ -373,7 +385,6 @@ def page_peta_persebaran(df_filtered, filter_info):
     df_grouped["latitude"] = df_grouped["desa"].apply(lambda x: get_koordinat(x)[0])
     df_grouped["longitude"] = df_grouped["desa"].apply(lambda x: get_koordinat(x)[1])
 
-    # --- METRIK HIGHLIGHT SEBELUM PETA ---
     st.markdown("---")
     total_kasus = df_grouped["jumlah_kasus"].sum()
     total_desa = df_grouped["desa"].nunique()
@@ -392,7 +403,7 @@ def page_peta_persebaran(df_filtered, filter_info):
 
     st.markdown(f"**Menampilkan persebaran pasien untuk:** `{pilihan_penyakit}`")
 
-    # --- RENDER PETA PLOTLY ---
+    # RENDER PETA PLOTLY
     fig = px.scatter_mapbox(
         df_grouped, 
         lat="latitude", 
@@ -405,15 +416,13 @@ def page_peta_persebaran(df_filtered, filter_info):
         zoom=11.5, 
         center={"lat": -7.218, "lon": 111.675}, 
         height=550,
-        size_max=35 # Ukuran titik diperbesar
+        size_max=35 
     )
     
-    # Mapbox Style responsif terhadap pilihan pengguna
     fig.update_layout(mapbox_style=map_style)
     fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
     st.plotly_chart(fig, use_container_width=True)
     
-    # --- TABEL DAN GRAFIK BERSAMPINGAN ---
     col_tabel, col_grafik = st.columns([1, 1])
     with col_tabel:
         st.markdown("#### 📋 Detail Kasus per Desa")
@@ -533,7 +542,7 @@ def page_ml(df_filtered, filter_info):
     )
     st.plotly_chart(fig, use_container_width=True)
 
-    # ================= KESIMPULAN ESTIMASI =================
+    # ================= KESIMPULAN ESTIMASI DENGAN CUSTOM HTML/CSS =================
     st.markdown(f"### 📢 Kesimpulan Estimasi Hingga {pd.to_datetime(target_date).strftime('%d %B %Y')}")
     if not forecast_future.empty:
         total_estimasi = int(round(forecast_future["yhat"].clip(lower=0).sum()))
@@ -547,7 +556,16 @@ def page_ml(df_filtered, filter_info):
 
         col_alert, col_metric1, col_metric2 = st.columns([2, 1, 1])
         with col_alert:
-            st.info(f"📆 Selama periode ke depan hingga **{tgl_target_akhir}**, AI memperkirakan akan ada **total akumulasi {total_estimasi} kunjungan/kasus** untuk **{pilihan_item}**. \n\nSementara itu, khusus pada pekan terakhir tersebut, diprediksi terdapat **{est_kunjungan_akhir} kunjungan** baru.")
+            # Mengganti st.info menjadi HTML Custom agar bisa diberi warna dari CSS class `.highlight-estimasi`
+            st.markdown(f"""
+                <div style="padding: 1rem; border-radius: 0.5rem; background-color: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2); margin-bottom: 1rem;">
+                    <span class="highlight-estimasi">
+                        📆 Selama periode ke depan hingga <b>{tgl_target_akhir}</b>, AI memperkirakan akan ada <b>total akumulasi {total_estimasi} kunjungan/kasus</b> untuk <b>{pilihan_item}</b>. <br><br>
+                        Sementara itu, khusus pada pekan terakhir tersebut, diprediksi terdapat <b>{est_kunjungan_akhir} kunjungan</b> baru.
+                    </span>
+                </div>
+            """, unsafe_allow_html=True)
+            
         with col_metric1:
             st.metric("Total Akumulasi Pasien", f"{total_estimasi} Pasien")
         with col_metric2:

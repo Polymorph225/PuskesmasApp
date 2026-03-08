@@ -13,7 +13,7 @@ Aplikasi ini dikembangkan sebagai wujud inovasi digitalisasi pelayanan kesehatan
 2. 🗺️ **Peta Persebaran Penyakit (Geospasial)**
    Memetakan lokasi asal pasien berdasarkan desa di wilayah Kecamatan Purwosari (dan sekitarnya) secara interaktif untuk melihat wilayah rawan/endemik suatu penyakit.
 3. 📈 **Prediksi & Peramalan Tren (AI Forecasting)**
-   Terintegrasi dengan algoritma **Facebook Prophet** untuk memprediksi dan meramalkan estimasi jumlah pasien atau kasus penyakit di masa depan (hingga 1 tahun ke depan) guna membantu perencanaan anggaran dan logistik obat.
+   Terintegrasi dengan algoritma **Prophet** untuk memprediksi dan meramalkan estimasi jumlah pasien atau kasus penyakit di masa depan (hingga 1 tahun ke depan) guna membantu perencanaan anggaran dan logistik obat.
 4. 🤖 **Asisten AI Kesehatan**
    Terkoneksi dengan **Google Gemini AI** yang berfungsi sebagai asisten pintar bagi tenaga kesehatan untuk merancang program penyuluhan, edukasi masyarakat, atau konsultasi administratif.
 

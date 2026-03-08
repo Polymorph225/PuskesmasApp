@@ -40,27 +40,26 @@ git clone [https://github.com/username_anda/nama_repositori.git](https://github.
 cd nama_repositori
 
 2. Buat Virtual Environment (Opsional namun disarankan)
+```bash
 python -m venv venv
 source venv/bin/activate  # Untuk Linux/Mac
 venv\Scripts\activate     # Untuk Windows
 
 3. Install Dependencies
+```bash
 pip install -r requirements.txt
 
 4. Konfigurasi API Key (Untuk Fitur Asisten AI)
-
+```bash
 a. Agar Asisten AI Gemini dapat berfungsi, Anda memerlukan API Key dari Google.
-
 b. Buat folder tersembunyi bernama .streamlit di dalam direktori proyek.
-
 c. Buat file secrets.toml di dalam folder tersebut.
-
 d. Isi file dengan format berikut:
 GEMINI_API_KEY = "MASUKKAN_API_KEY_GOOGLE_ANDA_DI_SINI"
-
 (Catatan: Jangan pernah memublikasikan file secrets.toml ke GitHub publik).
 
 5. Jalankan Aplikasi
+```bash
 streamlit run Puskesmas_app.py
 
 Aplikasi akan otomatis terbuka di browser Anda pada alamat http://localhost:8501.

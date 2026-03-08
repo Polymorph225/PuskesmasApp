@@ -51,17 +51,17 @@ def inject_custom_css():
            TAMBAHAN: KELAS KHUSUS UNTUK TEKS ESTIMASI
            ============================================== */
         .highlight-estimasi {
-            color: #2563eb; /* Warna BIRU menyala di mode terang (Light Mode) */
+            color: #1d4ed8; /* Biru Tua/Tegas untuk mode terang */
             line-height: 1.5;
             font-size: 1.05rem;
-            font-weight: 500;
+            font-weight: 600; /* Ditebalkan sedikit agar jelas */
         }
         
         /* Deteksi jika perangkat / browser dalam Dark Mode */
         @media (prefers-color-scheme: dark) {
             .highlight-estimasi {
-                color: #fde047 !important; /* Warna KUNING menyala khusus Dark Mode */
-                text-shadow: 0px 0px 2px rgba(0,0,0,0.5); /* Sedikit bayangan agar makin jelas */
+                color: #60a5fa !important; /* Biru Terang/Menyala khusus Dark Mode agar mudah dibaca */
+                text-shadow: 0px 1px 3px rgba(0,0,0,0.8); /* Efek bayangan agar tulisan tidak menyatu dengan background */
             }
         }
         </style>
@@ -557,13 +557,13 @@ def page_ml(df_filtered, filter_info):
 
         col_alert, col_metric1, col_metric2 = st.columns([2, 1, 1])
         with col_alert:
-            # Menggunakan CSS class `.highlight-estimasi`
+            # Menggunakan CSS class `.highlight-estimasi` agar warnanya biru cerah
             st.markdown(f"""
-                <div style="padding: 1rem; border-radius: 0.5rem; background-color: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2); margin-bottom: 1rem;">
-                    <span class="highlight-estimasi">
+                <div style="padding: 1rem; border-radius: 0.5rem; background-color: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); margin-bottom: 1rem;">
+                    <div class="highlight-estimasi">
                         📆 Selama periode ke depan hingga <b>{tgl_target_akhir}</b>, AI memperkirakan akan ada <b>total akumulasi {total_estimasi} kunjungan/kasus</b> untuk <b>{pilihan_item}</b>. <br><br>
                         Sementara itu, khusus pada pekan terakhir tersebut, diprediksi terdapat <b>{est_kunjungan_akhir} kunjungan</b> baru.
-                    </span>
+                    </div>
                 </div>
             """, unsafe_allow_html=True)
             

@@ -38,3 +38,25 @@ Jika Anda ingin menjalankan aplikasi ini di komputer/laptop Anda sendiri, ikuti 
 ```bash
 git clone [https://github.com/username_anda/nama_repositori.git](https://github.com/username_anda/nama_repositori.git)
 cd nama_repositori
+
+### 2. Buat Virtual Environment (Opsional namun disarankan)
+python -m venv venv
+source venv/bin/activate  # Untuk Linux/Mac
+venv\Scripts\activate     # Untuk Windows
+
+### 3. Install Dependencies
+Pastikan file requirements.txt sudah tersedia di dalam folder, lalu jalankan:
+pip install -r requirements.txt
+
+### 4. Konfigurasi API Key (Untuk Fitur Asisten AI)
+Agar Asisten AI Gemini dapat berfungsi, Anda memerlukan API Key dari Google.
+
+    - **Buat folder tersembunyi bernama .streamlit di dalam direktori proyek.
+
+    - **Buat file secrets.toml di dalam folder tersebut.
+
+   - ** Isi file dengan format berikut:
+
+    GEMINI_API_KEY = "MASUKKAN_API_KEY_GOOGLE_ANDA_DI_SINI"
+
+    (Catatan: Jangan pernah memublikasikan file secrets.toml ke GitHub publik).

@@ -18,12 +18,12 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ========== TAMPILAN (CSS) ==========
+# ========== TAMPILAN (CSS) ADAPTIF (LIGHT/DARK MODE) ==========
 def inject_custom_css():
     st.markdown(
         """
         <style>
-        body { background-color: #f5f7fb; }
+        /* Menggunakan variabel bawaan Streamlit agar merespon Light/Dark mode otomatis */
         .block-container {
             padding-top: 1.5rem;
             padding-bottom: 3rem;
@@ -31,18 +31,20 @@ def inject_custom_css():
             padding-right: 2rem;
         }
         h1 { font-weight: 700 !important; }
+        
         div[data-testid="metric-container"] {
             padding: 0.75rem 1rem;
             border-radius: 0.75rem;
-            background-color: #ffffff;
-            border: 1px solid rgba(148, 163, 184, 0.6);
-            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+            background-color: var(--secondary-background-color); 
+            border: 1px solid var(--faded-text-color);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
         }
-        section[data-testid="stSidebar"] { background-color: #f3f4f6; }
+        
         div[data-testid="stDataFrame"] {
             border-radius: 0.5rem;
-            border: 1px solid rgba(148, 163, 184, 0.4);
+            border: 1px solid var(--faded-text-color);
         }
+        
         hr { margin: 0.75rem 0 1rem 0; }
         </style>
         """,
@@ -322,9 +324,21 @@ def page_peta_persebaran(df_filtered, filter_info):
         st.error("❌ Kolom 'desa' atau 'diagnosa' tidak ditemukan dalam data.")
         return
 
-    st.markdown("### 🔍 Pilih Penyakit untuk Dipetakan")
-    top_penyakit = df_filtered["diagnosa"].value_counts().head(20).index.tolist()
-    pilihan_penyakit = st.selectbox("Pilihan Diagnosa:", options=["-- Semua Penyakit (Top 10) --"] + top_penyakit, label_visibility="collapsed")
+    st.markdown("### 🔍 Filter Persebaran")
+    
+    # Membagi kolom untuk input agar lebih rapi
+    col_pilih_penyakit, col_pilih_tema = st.columns([3, 1])
+    
+    with col_pilih_penyakit:
+        top_penyakit = df_filtered["diagnosa"].value_counts().head(20).index.tolist()
+        pilihan_penyakit = st.selectbox("Pilihan Diagnosa:", options=["-- Semua Penyakit (Top 10) --"] + top_penyakit)
+    
+    with col_pilih_tema:
+        # Menambahkan fitur pilihan Tema Peta untuk adaptasi Dark Mode
+        tema_peta = st.selectbox("Tema Peta:", ["Terang", "Gelap"])
+
+    # Mengatur gaya peta (Mapbox Style) berdasarkan pilihan pengguna
+    map_style = "carto-darkmatter" if tema_peta == "Gelap" else "carto-positron"
 
     if pilihan_penyakit != "-- Semua Penyakit (Top 10) --":
         df_map = df_filtered[df_filtered["diagnosa"] == pilihan_penyakit].copy()
@@ -359,7 +373,7 @@ def page_peta_persebaran(df_filtered, filter_info):
     df_grouped["latitude"] = df_grouped["desa"].apply(lambda x: get_koordinat(x)[0])
     df_grouped["longitude"] = df_grouped["desa"].apply(lambda x: get_koordinat(x)[1])
 
-    # --- METRIK HIGHLIGHT ---
+    # --- METRIK HIGHLIGHT SEBELUM PETA ---
     st.markdown("---")
     total_kasus = df_grouped["jumlah_kasus"].sum()
     total_desa = df_grouped["desa"].nunique()
@@ -387,23 +401,22 @@ def page_peta_persebaran(df_filtered, filter_info):
         size="jumlah_kasus",
         hover_name="desa",
         hover_data={"latitude": False, "longitude": False, "diagnosa": True, "jumlah_kasus": True},
-        color_discrete_sequence=px.colors.qualitative.Plotly, # Warna lebih cerah dan tegas
+        color_discrete_sequence=px.colors.qualitative.Plotly, 
         zoom=11.5, 
         center={"lat": -7.218, "lon": 111.675}, 
         height=550,
-        size_max=35 # Ukuran titik diperbesar agar lebih jelas
+        size_max=35 # Ukuran titik diperbesar
     )
     
-    # Menggunakan background carto-positron yang lebih bersih (abu-abu terang)
-    fig.update_layout(mapbox_style="carto-positron")
+    # Mapbox Style responsif terhadap pilihan pengguna
+    fig.update_layout(mapbox_style=map_style)
     fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
     st.plotly_chart(fig, use_container_width=True)
     
-    # --- TABEL DAN GRAFIK SAMPING-SAMPINGAN ---
+    # --- TABEL DAN GRAFIK BERSAMPINGAN ---
     col_tabel, col_grafik = st.columns([1, 1])
     with col_tabel:
         st.markdown("#### 📋 Detail Kasus per Desa")
-        # Menghapus index angka bawaan pandas agar tabel lebih rapi
         st.dataframe(df_grouped[["desa", "diagnosa", "jumlah_kasus"]].sort_values(by="jumlah_kasus", ascending=False), use_container_width=True, hide_index=True)
 
     with col_grafik:
@@ -520,13 +533,11 @@ def page_ml(df_filtered, filter_info):
     )
     st.plotly_chart(fig, use_container_width=True)
 
-    # ================= KESIMPULAN ESTIMASI (UPDATE) =================
+    # ================= KESIMPULAN ESTIMASI =================
     st.markdown(f"### 📢 Kesimpulan Estimasi Hingga {pd.to_datetime(target_date).strftime('%d %B %Y')}")
     if not forecast_future.empty:
-        # Menghitung total akumulasi kunjungan selama masa prediksi
         total_estimasi = int(round(forecast_future["yhat"].clip(lower=0).sum()))
         
-        # Mengambil prediksi spesifik di titik akhir (minggu sesuai target tanggal yang dipilih user)
         target_week = forecast_future.iloc[-1]
         tgl_target_akhir = target_week["ds"].strftime("%d %B %Y")
         

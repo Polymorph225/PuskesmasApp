@@ -1,110 +1,40 @@
-# 🏥 Dashboard Analisis Data Puskesmas
+# 🏥 PuskesmasApp - Dashboard Analisis & Peramalan Cerdas
 
-Aplikasi ini adalah **dashboard interaktif berbasis Streamlit** untuk menganalisis data kunjungan Puskesmas.  
-Fokusnya adalah membantu tenaga kesehatan, pengelola program, dan pengambil kebijakan di tingkat fasilitas pelayanan dasar untuk:
+PuskesmasApp adalah sebuah aplikasi web interaktif (*dashboard*) yang dirancang khusus untuk mempermudah fasilitas kesehatan dalam mengolah, menganalisis, dan memvisualisasikan data kunjungan pasien atau rekam medis elektronik (RME). 
 
-- Memahami pola kunjungan pasien
-- Mengidentifikasi penyakit terbanyak
-- Melihat distribusi berdasarkan demografi dan wilayah
-- Menganalisis pola pembiayaan
-- Melakukan proyeksi sederhana risiko lonjakan kasus dengan model Machine Learning
-- Mendapatkan rekomendasi program melalui Asisten AI berbasis Gemini
+Aplikasi ini dikembangkan sebagai wujud inovasi digitalisasi pelayanan kesehatan di lingkungan **UPT Puskesmas Purwosari, Kabupaten Bojonegoro**, dan merupakan bagian dari proyek aktualisasi **Pelatihan Dasar (Latsar) CPNS Tahun 2026**.
 
 ---
 
 ## ✨ Fitur Utama
 
-- 📂 **Upload Data Kunjungan**
-  - Mendukung file **CSV**, **XLS**, dan **XLSX**
-  - Otomatis melakukan _data cleaning_ dan normalisasi nama kolom (tanggal, no RM, umur, jenis kelamin, poli, diagnosa, pembiayaan, desa)
-  - Menangani variasi nama kolom yang umum dipakai di Puskesmas
-
-- 🧹 **Pembersihan & Standarisasi Data**
-  - Konversi tanggal kunjungan ke tipe `datetime`
-  - Normalisasi usia (termasuk format teks, misal: `36 Thn 9 Bln 19 Hari`)
-  - Normalisasi jenis kelamin (`L`, `P`, `LK`, `PR`, dsb.) menjadi `Laki-Laki` dan `Perempuan`
-  - Otomatis menghapus kolom alamat yang tidak relevan dan hanya mempertahankan kolom berbasis **desa**
-
-- 🎛️ **Filter Interaktif**
-  - Rentang **tanggal kunjungan**
-  - **Tahun** kunjungan
-  - **Poli / unit layanan**
-  - **Jenis kelamin**
-  - **Kelompok umur** (misal: `<1 th`, `1–4 th`, `5–14 th`, dst.)
-  - **Desa / kelurahan**
-  - **Jenis pembiayaan** (JKN, umum, dll.)
-
-- 📊 **Ringkasan & Visualisasi**
-  - Ringkasan total kunjungan, pasien unik, jumlah poli aktif, dan variasi diagnosa
-  - Tren kunjungan per bulan
-  - Distribusi kunjungan per poli, jenis kelamin, kelompok umur
-  - Top N diagnosa terbanyak
-  - Crosstab antar variabel (misalnya poli × jenis kelamin, diagnosa × jenis kelamin, diagnosa × kelompok umur)
-
-- 💳 **Analisis Pembiayaan**
-  - Ringkasan kunjungan per jenis pembiayaan
-  - Matriks poli × pembiayaan untuk melihat pola penggunaan layanan dan jaminan kesehatan
-
-- 🧠 **Model Machine Learning untuk Risiko Lonjakan Kasus**
-  - Menggunakan **XGBoost** untuk memodelkan risiko **lonjakan kasus** per bulan pada diagnosa/poli tertentu
-  - Definisi lonjakan berbasis **persentil historis** (dapat diatur oleh pengguna)
-  - Menampilkan:
-    - Tren historis kunjungan per bulan
-    - Probabilitas lonjakan di beberapa bulan ke depan
-    - Ringkasan bulan dengan risiko tinggi (mis. ≥70%)
-
-- 🤖 **Asisten AI (Gemini) untuk Interpretasi & Rekomendasi**
-  - Membuat ringkasan numerik dari data yang sudah difilter
-  - Mengirim ringkasan tersebut ke model **Gemini** (Google Generative AI)
-  - Menghasilkan:
-    - Interpretasi pola kunjungan / penyakit / pembiayaan
-    - Identifikasi masalah kesehatan prioritas
-    - Rekomendasi program, intervensi, dan kebijakan yang relevan dengan konteks Puskesmas di Indonesia
-
-- 📥 **Ekspor Data Terfilter**
-  - Mengunduh data yang sudah difilter dalam format **CSV**
-  - Membuat _pivot table_ sederhana langsung dari antarmuka aplikasi
-
-- 🎨 **Tampilan Modern dengan Tema Dark & Light**
-  - Pilihan **tema Dark** dan **Light** yang dapat diubah dari sidebar
-  - Desain UI dengan:
-    - Kartu metrik
-    - Hero section
-    - Kontras warna yang nyaman untuk penggunaan lama
-    - Layout yang rapi dan mudah dibaca
+1. 📊 **Dashboard Analisis Komprehensif**
+   Menganalisis tren kunjungan pasien, distribusi demografi (usia & jenis kelamin), jenis pembiayaan, hingga diagnosa penyakit terbanyak secara *real-time*.
+2. 🗺️ **Peta Persebaran Penyakit (Geospasial)**
+   Memetakan lokasi asal pasien berdasarkan desa di wilayah Kecamatan Purwosari (dan sekitarnya) secara interaktif untuk melihat wilayah rawan/endemik suatu penyakit.
+3. 📈 **Prediksi & Peramalan Tren (AI Forecasting)**
+   Terintegrasi dengan algoritma **Facebook Prophet** untuk memprediksi dan meramalkan estimasi jumlah pasien atau kasus penyakit di masa depan (hingga 1 tahun ke depan) guna membantu perencanaan anggaran dan logistik obat.
+4. 🤖 **Asisten AI Kesehatan**
+   Terkoneksi dengan **Google Gemini AI** yang berfungsi sebagai asisten pintar bagi tenaga kesehatan untuk merancang program penyuluhan, edukasi masyarakat, atau konsultasi administratif.
 
 ---
 
 ## 🛠️ Teknologi yang Digunakan
 
-- **Python**
-- **Streamlit** – untuk UI dashboard interaktif
-- **Pandas & NumPy** – untuk pemrosesan dan analisis data
-- **scikit-learn** – untuk model Machine Learning (XGBoost)
-- **Google Generative AI (Gemini)** – untuk Asisten AI (analisis dan rekomendasi)
-- **CSS kustom** – untuk tema dark/light dan efek tampilan yang lembut
+Aplikasi ini dibangun menggunakan bahasa pemrograman **Python** dengan dukungan *library* berikut:
+- **[Streamlit](https://streamlit.io/):** *Framework* utama untuk membangun antarmuka web interaktif.
+- **[Pandas & NumPy](https://pandas.pydata.org/):** Manipulasi dan pembersihan data struktural.
+- **[Plotly Express](https://plotly.com/python/):** Pembuatan grafik visual dan rendering peta interaktif.
+- **[Prophet](https://facebook.github.io/prophet/):** Model *Machine Learning* untuk *Time-Series Forecasting*.
+- **[Google GenAI](https://ai.google.dev/):** Integrasi *Large Language Model* (LLM) untuk fitur Asisten AI.
 
 ---
 
-## 🚀 Cara Menjalankan
+## 🚀 Cara Instalasi & Menjalankan di Komputer Lokal (Localhost)
 
+Jika Anda ingin menjalankan aplikasi ini di komputer/laptop Anda sendiri, ikuti langkah-langkah berikut:
+
+### 1. Clone Repositori
 ```bash
-# 1. Clone repository
-git clone https://github.com/username/nama-repo.git
-cd nama-repo
-
-# 2. Buat virtual environment (opsional tapi disarankan)
-python -m venv venv
-source venv/bin/activate        # di Linux/Mac
-venv\Scripts\activate           # di Windows
-
-# 3. Install dependencies
-pip install -r requirements.txt
-
-# 4. Set API key Gemini (opsi)
-# Bisa melalui environment variable:
-# Export GEMINI_API_KEY="API_KEY_ANDA"
-# Atau lewat st.secrets di Streamlit Cloud
-
-# 5. Jalankan aplikasi
-streamlit run app.py
+git clone [https://github.com/username_anda/nama_repositori.git](https://github.com/username_anda/nama_repositori.git)
+cd nama_repositori

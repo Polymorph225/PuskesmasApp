@@ -262,7 +262,7 @@ def show_active_filters(filter_info):
         if v: chips.append(f"{k.title()}: {', '.join(map(str, v))}")
     if chips: st.caption("🎯 **Filter aktif:** " + " | ".join(chips))
 
-# ========= HAL কতটা DASHBOARD =========
+# ========= HALAMAN DASHBOARD =========
 
 def page_overview(df_filtered, filter_info):
     st.subheader("📌 Ringkasan Umum")
@@ -309,6 +309,7 @@ def page_penyakit(df_filtered, filter_info):
         top_n = st.slider("Jumlah diagnosa", 5, 20, 10)
         st.bar_chart(df_filtered["diagnosa"].value_counts().head(top_n))
 
+# ================== HALAMAN PETA (DIPERBARUI) ==================
 def page_peta_persebaran(df_filtered, filter_info):
     st.subheader("🗺️ Peta Persebaran Penyakit")
     show_active_filters(filter_info)
@@ -321,8 +322,9 @@ def page_peta_persebaran(df_filtered, filter_info):
         st.error("❌ Kolom 'desa' atau 'diagnosa' tidak ditemukan dalam data.")
         return
 
+    st.markdown("### 🔍 Pilih Penyakit untuk Dipetakan")
     top_penyakit = df_filtered["diagnosa"].value_counts().head(20).index.tolist()
-    pilihan_penyakit = st.selectbox("Pilih Diagnosa Penyakit untuk dipetakan:", options=["-- Semua Penyakit (Top 10) --"] + top_penyakit)
+    pilihan_penyakit = st.selectbox("Pilihan Diagnosa:", options=["-- Semua Penyakit (Top 10) --"] + top_penyakit, label_visibility="collapsed")
 
     if pilihan_penyakit != "-- Semua Penyakit (Top 10) --":
         df_map = df_filtered[df_filtered["diagnosa"] == pilihan_penyakit].copy()
@@ -357,8 +359,26 @@ def page_peta_persebaran(df_filtered, filter_info):
     df_grouped["latitude"] = df_grouped["desa"].apply(lambda x: get_koordinat(x)[0])
     df_grouped["longitude"] = df_grouped["desa"].apply(lambda x: get_koordinat(x)[1])
 
+    # --- METRIK HIGHLIGHT ---
+    st.markdown("---")
+    total_kasus = df_grouped["jumlah_kasus"].sum()
+    total_desa = df_grouped["desa"].nunique()
+    
+    desa_agregat = df_grouped.groupby("desa")["jumlah_kasus"].sum()
+    desa_tertinggi = desa_agregat.idxmax() if not desa_agregat.empty else "-"
+    kasus_tertinggi = desa_agregat.max() if not desa_agregat.empty else 0
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric(label="Total Kasus Terpeta", value=f"{total_kasus} Pasien")
+    with col2:
+        st.metric(label="Total Desa Terdampak", value=f"{total_desa} Desa")
+    with col3:
+        st.metric(label="Desa Kasus Tertinggi", value=f"{desa_tertinggi}", delta=f"{kasus_tertinggi} Kasus", delta_color="off")
+
     st.markdown(f"**Menampilkan persebaran pasien untuk:** `{pilihan_penyakit}`")
 
+    # --- RENDER PETA PLOTLY ---
     fig = px.scatter_mapbox(
         df_grouped, 
         lat="latitude", 
@@ -367,27 +387,38 @@ def page_peta_persebaran(df_filtered, filter_info):
         size="jumlah_kasus",
         hover_name="desa",
         hover_data={"latitude": False, "longitude": False, "diagnosa": True, "jumlah_kasus": True},
-        color_discrete_sequence=px.colors.qualitative.Pastel,
+        color_discrete_sequence=px.colors.qualitative.Plotly, # Warna lebih cerah dan tegas
         zoom=11.5, 
         center={"lat": -7.218, "lon": 111.675}, 
-        height=550
+        height=550,
+        size_max=35 # Ukuran titik diperbesar agar lebih jelas
     )
     
-    fig.update_layout(mapbox_style="open-street-map")
+    # Menggunakan background carto-positron yang lebih bersih (abu-abu terang)
+    fig.update_layout(mapbox_style="carto-positron")
     fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
     st.plotly_chart(fig, use_container_width=True)
     
-    with st.expander("Lihat Detail Tabel Kasus per Desa"):
-        st.dataframe(df_grouped[["desa", "diagnosa", "jumlah_kasus"]].sort_values(by="jumlah_kasus", ascending=False), use_container_width=True)
+    # --- TABEL DAN GRAFIK SAMPING-SAMPINGAN ---
+    col_tabel, col_grafik = st.columns([1, 1])
+    with col_tabel:
+        st.markdown("#### 📋 Detail Kasus per Desa")
+        # Menghapus index angka bawaan pandas agar tabel lebih rapi
+        st.dataframe(df_grouped[["desa", "diagnosa", "jumlah_kasus"]].sort_values(by="jumlah_kasus", ascending=False), use_container_width=True, hide_index=True)
+
+    with col_grafik:
+        st.markdown("#### 📊 Top Desa Terdampak")
+        top_desa_df = df_grouped.groupby("desa")["jumlah_kasus"].sum().reset_index().sort_values("jumlah_kasus", ascending=False).head(10)
+        st.bar_chart(top_desa_df.set_index("desa")["jumlah_kasus"])
 
 def page_pembiayaan(df_filtered, filter_info):
     st.subheader("💳 Analisis Pembiayaan")
     if df_filtered is None or "pembiayaan" not in df_filtered.columns: return
     st.bar_chart(df_filtered["pembiayaan"].value_counts())
 
-# ================== HALAMAN ML (PROPHET) ==================
+# ================== HALAMAN ML (FACEBOOK PROPHET) ==================
 def page_ml(df_filtered, filter_info):
-    st.subheader("📈 Prediksi & Peramalan Tren (Prophet)")
+    st.subheader("📈 Prediksi & Peramalan Tren (Facebook Prophet)")
     show_active_filters(filter_info)
 
     if df_filtered is None or len(df_filtered) == 0:
@@ -410,7 +441,7 @@ def page_ml(df_filtered, filter_info):
 
     max_date = df_ml["tanggal_kunjungan"].max().date()
 
-    st.info("💡 **Model:** Menggunakan Prophet untuk memprediksi tren dan estimasi jumlah kunjungan/kasus di masa depan.")
+    st.info("💡 **Model:** Menggunakan Facebook Prophet untuk memprediksi tren dan estimasi jumlah kunjungan/kasus di masa depan.")
     st.markdown("---")
 
     with st.container():
@@ -570,4 +601,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

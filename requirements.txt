@@ -3,6 +3,4 @@ pandas
 numpy
 plotly
 prophet
-scikit-learn
-xgboost
 google-genai

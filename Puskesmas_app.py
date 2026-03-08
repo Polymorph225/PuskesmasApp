@@ -385,9 +385,9 @@ def page_pembiayaan(df_filtered, filter_info):
     if df_filtered is None or "pembiayaan" not in df_filtered.columns: return
     st.bar_chart(df_filtered["pembiayaan"].value_counts())
 
-# ================== HALAMAN ML (FACEBOOK PROPHET) ==================
+# ================== HALAMAN ML (PROPHET) ==================
 def page_ml(df_filtered, filter_info):
-    st.subheader("📈 Prediksi & Peramalan Tren (Facebook Prophet)")
+    st.subheader("📈 Prediksi & Peramalan Tren (Prophet)")
     show_active_filters(filter_info)
 
     if df_filtered is None or len(df_filtered) == 0:
@@ -410,7 +410,7 @@ def page_ml(df_filtered, filter_info):
 
     max_date = df_ml["tanggal_kunjungan"].max().date()
 
-    st.info("💡 **Model:** Menggunakan Facebook Prophet untuk memprediksi tren dan estimasi jumlah kunjungan/kasus di masa depan.")
+    st.info("💡 **Model:** Menggunakan Prophet untuk memprediksi tren dan estimasi jumlah kunjungan/kasus di masa depan.")
     st.markdown("---")
 
     with st.container():
@@ -570,3 +570,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

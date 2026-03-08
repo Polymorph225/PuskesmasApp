@@ -51,18 +51,18 @@ def inject_custom_css():
            TAMBAHAN: KELAS KHUSUS UNTUK TEKS ESTIMASI
            ============================================== */
         .highlight-estimasi {
-            color: #1d4ed8; /* Biru Tua/Tegas untuk mode terang */
+            color: #1d4ed8 !important; /* Selalu warna Biru Tua/Tegas di mode terang maupun gelap */
             line-height: 1.5;
             font-size: 1.05rem;
-            font-weight: 600; /* Ditebalkan sedikit agar jelas */
-        }
-        
-        /* Deteksi jika perangkat / browser dalam Dark Mode */
-        @media (prefers-color-scheme: dark) {
-            .highlight-estimasi {
-                color: #60a5fa !important; /* Biru Terang/Menyala khusus Dark Mode agar mudah dibaca */
-                text-shadow: 0px 1px 3px rgba(0,0,0,0.8); /* Efek bayangan agar tulisan tidak menyatu dengan background */
-            }
+            font-weight: 800; /* Ditebalkan maksimal agar stroke lebih terlihat jelas */
+            
+            /* Efek Stroke Warna Putih di sekeliling huruf */
+            text-shadow: 
+                -1px -1px 0 #ffffff,  
+                 1px -1px 0 #ffffff,
+                -1px  1px 0 #ffffff,
+                 1px  1px 0 #ffffff,
+                 0px  0px  5px rgba(255,255,255,0.8); /* Tambahan pendaran cahaya putih di belakangnya */
         }
         </style>
         """,
@@ -557,7 +557,7 @@ def page_ml(df_filtered, filter_info):
 
         col_alert, col_metric1, col_metric2 = st.columns([2, 1, 1])
         with col_alert:
-            # Menggunakan CSS class `.highlight-estimasi` agar warnanya biru cerah
+            # Menggunakan CSS class `.highlight-estimasi` (biru + stroke putih)
             st.markdown(f"""
                 <div style="padding: 1rem; border-radius: 0.5rem; background-color: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); margin-bottom: 1rem;">
                     <div class="highlight-estimasi">

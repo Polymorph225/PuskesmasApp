@@ -51,9 +51,9 @@ def inject_custom_css():
            TAMBAHAN: KELAS KHUSUS UNTUK TEKS ESTIMASI
            ============================================== */
         .highlight-estimasi {
-            color: #2563eb; /* Warna BIRU saat Light Mode */
+            color: #2563eb; /* Warna BIRU menyala di mode terang (Light Mode) */
             line-height: 1.5;
-            font-size: 1rem;
+            font-size: 1.05rem;
             font-weight: 500;
         }
         
@@ -543,7 +543,7 @@ def page_ml(df_filtered, filter_info):
     )
     st.plotly_chart(fig, use_container_width=True)
 
-    # ================= KESIMPULAN ESTIMASI =================
+    # ================= KESIMPULAN ESTIMASI DENGAN CUSTOM HTML/CSS =================
     st.markdown(f"### 📢 Kesimpulan Estimasi Hingga {pd.to_datetime(target_date).strftime('%d %B %Y')}")
     if not forecast_future.empty:
         total_estimasi = int(round(forecast_future["yhat"].clip(lower=0).sum()))
@@ -557,9 +557,9 @@ def page_ml(df_filtered, filter_info):
 
         col_alert, col_metric1, col_metric2 = st.columns([2, 1, 1])
         with col_alert:
-            # Menggunakan class CSS buatan sendiri yang bisa ganti warna otomatis!
+            # Menggunakan CSS class `.highlight-estimasi`
             st.markdown(f"""
-                <div style="padding: 1rem; border-radius: 0.5rem; background-color: var(--secondary-background-color); border: 1px solid var(--faded-text-color); margin-bottom: 1rem;">
+                <div style="padding: 1rem; border-radius: 0.5rem; background-color: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2); margin-bottom: 1rem;">
                     <span class="highlight-estimasi">
                         📆 Selama periode ke depan hingga <b>{tgl_target_akhir}</b>, AI memperkirakan akan ada <b>total akumulasi {total_estimasi} kunjungan/kasus</b> untuk <b>{pilihan_item}</b>. <br><br>
                         Sementara itu, khusus pada pekan terakhir tersebut, diprediksi terdapat <b>{est_kunjungan_akhir} kunjungan</b> baru.

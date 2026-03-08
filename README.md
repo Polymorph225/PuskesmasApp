@@ -39,32 +39,54 @@ Jika Anda ingin menjalankan aplikasi ini di komputer/laptop Anda sendiri, ikuti 
 git clone [https://github.com/username_anda/nama_repositori.git](https://github.com/username_anda/nama_repositori.git)
 cd nama_repositori
 
-2. Buat Virtual Environment (Opsional namun disarankan)
+```
+
+### 2. Buat Virtual Environment (Opsional namun disarankan)
+
 ```bash
 python -m venv venv
 source venv/bin/activate  # Untuk Linux/Mac
 venv\Scripts\activate     # Untuk Windows
 
-3. Install Dependencies
+```
+
+### 3. Install Dependencies
+
 ```bash
 pip install -r requirements.txt
 
-4. Konfigurasi API Key (Untuk Fitur Asisten AI)
-```bash
-a. Agar Asisten AI Gemini dapat berfungsi, Anda memerlukan API Key dari Google.
-b. Buat folder tersembunyi bernama .streamlit di dalam direktori proyek.
-c. Buat file secrets.toml di dalam folder tersebut.
-d. Isi file dengan format berikut:
-GEMINI_API_KEY = "MASUKKAN_API_KEY_GOOGLE_ANDA_DI_SINI"
-(Catatan: Jangan pernah memublikasikan file secrets.toml ke GitHub publik).
+```
 
-5. Jalankan Aplikasi
+### 4. Konfigurasi API Key (Untuk Fitur Asisten AI)
+
+Agar Asisten AI Gemini dapat berfungsi, Anda memerlukan API Key dari Google.
+
+1. Buat folder tersembunyi bernama `.streamlit` di dalam direktori proyek.
+2. Buat file `secrets.toml` di dalam folder tersebut.
+3. Isi file dengan format berikut:
+```toml
+GEMINI_API_KEY = "MASUKKAN_API_KEY_GOOGLE_ANDA_DI_SINI"
+
+```
+
+
+
+*(Catatan: Jangan pernah memublikasikan file `secrets.toml` ke GitHub publik).*
+
+### 5. Jalankan Aplikasi
+
 ```bash
 streamlit run Puskesmas_app.py
 
-Aplikasi akan otomatis terbuka di browser Anda pada alamat http://localhost:8501.
+```
 
-📂 Struktur Repositori
+Aplikasi akan otomatis terbuka di *browser* Anda pada alamat `http://localhost:8501`.
+
+---
+
+## 📂 Struktur Repositori
+
+```text
 📁 nama_repositori/
 │
 ├── Puskesmas_app.py      # Kode sumber utama aplikasi Streamlit
@@ -73,17 +95,25 @@ Aplikasi akan otomatis terbuka di browser Anda pada alamat http://localhost:8501
 └── .streamlit/           # (Lokal) Folder konfigurasi Streamlit
     └── secrets.toml      # (Lokal) Kunci API Rahasia
 
-💡 Cara Penggunaan Singkat
+```
 
-    Buka aplikasi PuskesmasApp.
+---
 
-    Pada panel sebelah kiri (Sidebar), unggah file data kunjungan pasien Anda dalam format .CSV atau .XLSX.
+## 💡 Cara Penggunaan Singkat
 
-    Gunakan filter yang tersedia (rentang waktu, poli, jenis kelamin, desa) untuk memfokuskan data.
+1. Buka aplikasi PuskesmasApp.
+2. Pada panel sebelah kiri (Sidebar), unggah file data kunjungan pasien Anda dalam format `.CSV` atau `.XLSX`.
+3. Gunakan filter yang tersedia (rentang waktu, poli, jenis kelamin, desa) untuk memfokuskan data.
+4. Navigasikan menu di sidebar untuk melihat Ringkasan, Peta Persebaran, Peramalan AI, hingga berkonsultasi dengan Asisten AI.
 
-    Navigasikan menu di sidebar untuk melihat Ringkasan, Peta Persebaran, Peramalan AI, hingga berkonsultasi dengan Asisten AI.
+---
 
-📞 Kontak & Pengembang
+## 📞 Kontak & Pengembang
 
 Dikembangkan oleh peserta Latsar CPNS Tahun 2026.
-Untuk pertanyaan, masukan, atau kendala terkait aplikasi ini, silakan hubungi pengembang melalui repositori ini (buka Issue atau hubungi langsung secara internal di UPT Puskesmas Purwosari).
+
+Untuk pertanyaan, masukan, atau kendala terkait aplikasi ini, silakan hubungi pengembang melalui repositori ini (buka *Issue* atau hubungi langsung secara internal di UPT Puskesmas Purwosari).
+
+```
+
+```

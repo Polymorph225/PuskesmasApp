@@ -48,7 +48,7 @@ def inject_custom_css():
         hr { margin: 0.75rem 0 1rem 0; }
         
         /* ==============================================
-           TAMBAHAN: KELAS KHUSUS UNTUK TEKS ESTIMASI
+           KELAS KHUSUS UNTUK TEKS ESTIMASI PROPHET
            ============================================== */
         .highlight-estimasi {
             color: #1d4ed8 !important; /* Selalu warna Biru Tua/Tegas di mode terang maupun gelap */
@@ -557,7 +557,7 @@ def page_ml(df_filtered, filter_info):
 
         col_alert, col_metric1, col_metric2 = st.columns([2, 1, 1])
         with col_alert:
-            # Menggunakan CSS class `.highlight-estimasi` (biru + stroke putih)
+            # Menggunakan CSS class `.highlight-estimasi` (warna biru tua, tebal, stroke tepi putih)
             st.markdown(f"""
                 <div style="padding: 1rem; border-radius: 0.5rem; background-color: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); margin-bottom: 1rem;">
                     <div class="highlight-estimasi">
@@ -603,7 +603,12 @@ def page_ai_assistant(df_filtered, filter_info, client):
                 res = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
                 st.markdown(res.text)
             except Exception as e:
-                st.error(f"Error: {e}")
+                error_msg = str(e)
+                # Tangkapan error anti-panik untuk limit kuota Gemini API
+                if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+                    st.warning("⏳ **Sistem AI sedang sibuk (Limit Penggunaan).** Silakan tunggu sekitar 1 menit, lalu klik 'Kirim' lagi.")
+                else:
+                    st.error("❌ Gagal terhubung ke server AI. Pastikan internet Anda stabil atau API Key valid.")
 
 # ========= MAIN =========
 

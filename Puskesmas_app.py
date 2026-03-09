@@ -91,32 +91,25 @@ st.markdown(
 
 @st.cache_resource
 def get_gemini_client():
-    """
-    Membuat client Gemini berdasarkan API key dari:
-    1. st.secrets["GEMINI_API_KEY"], atau
-    2. environment variable GEMINI_API_KEY / GOOGLE_API_KEY
-    """
     api_key = None
-
-    # 1. mencoba ambil dari st.secrets (lebih aman untuk produksi)
     try:
         api_key = st.secrets.get("GEMINI_API_KEY", None)
     except Exception:
         api_key = None
 
-    # 2. kalau belum ada, coba dari environment variable
     if api_key is None:
         api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 
     if not api_key:
-        st.warning(
-            "API key Gemini belum diset. "
-            "Set di st.secrets['GEMINI_API_KEY'] atau environment variable GEMINI_API_KEY."
-        )
+        st.warning("API key Gemini belum diset. Fitur AI Chat mungkin tidak berfungsi.")
         return None
 
-    client = genai.Client(api_key=api_key)
-    return client
+    try:
+        client = genai.Client(api_key=api_key)
+        return client
+    except Exception as e:
+        st.error(f"Gagal inisialisasi Gemini Client: {e}")
+        return None
 
 # ================== DATA CLEANING HELPER ==================
 

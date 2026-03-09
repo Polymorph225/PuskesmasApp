@@ -7,7 +7,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 # Library Machine Learning & AI
-from google import genai
+import google.generativeai as genai # <--- UPDATED IMPORT
 from prophet import Prophet
 
 # ========== KONFIGURASI HALAMAN ==========
@@ -93,22 +93,29 @@ st.markdown(
 def get_gemini_client():
     api_key = None
     try:
-        api_key = st.secrets.get("GEMINI_API_KEY", None)
-    except Exception:
-        api_key = None
+        # Check Streamlit secrets first
+        api_key = st.secrets.get("GEMINI_API_KEY")
+    except FileNotFoundError:
+        pass # Handle case where secrets.toml might not exist yet
+    except Exception as e:
+        print(f"Error accessing secrets: {e}")
 
-    if api_key is None:
+    # Fallback to environment variables if not in secrets
+    if not api_key:
         api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 
     if not api_key:
-        st.warning("API key Gemini belum diset. Fitur AI Chat mungkin tidak berfungsi.")
+        st.warning("API key Gemini belum diset. Fitur AI Chat mungkin tidak berfungsi. Pastikan Anda telah mengatur GEMINI_API_KEY di secrets.toml atau environment variable.")
         return None
 
     try:
-        client = genai.Client(api_key=api_key)
-        return client
+        # Correctly configure the generativeai library
+        genai.configure(api_key=api_key)
+        # We don't return a 'client' object here like in some other SDKs, 
+        # we just return True to indicate successful configuration
+        return True 
     except Exception as e:
-        st.error(f"Gagal inisialisasi Gemini Client: {e}")
+        st.error(f"Gagal inisialisasi Gemini API: {e}")
         return None
 
 # ================== DATA CLEANING HELPER ==================
@@ -587,11 +594,11 @@ def page_quality(df):
     st.write("Missing Values:")
     st.dataframe(df.isna().sum().to_frame("Missing Count"))
 
-def page_ai_assistant(df_filtered, filter_info, client):
+def page_ai_assistant(df_filtered, filter_info, is_genai_configured):
     st.subheader("🤖 Asisten AI")
     if df_filtered is None: return
-    if not client: 
-        st.error("API Key belum diset.")
+    if not is_genai_configured: 
+        st.error("API Key belum diset. Asisten AI tidak dapat digunakan.")
         return
 
     user_q = st.text_area("Tanya AI tentang data ini:", placeholder="Saran program untuk diagnosa terbanyak?")
@@ -600,21 +607,25 @@ def page_ai_assistant(df_filtered, filter_info, client):
         prompt = f"Sebagai analis kesehatan. Data: {context}. Pertanyaan: {user_q}"
         with st.spinner("Berpikir..."):
             try:
-                res = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
-                st.markdown(res.text)
+                # Use the genai module directly, selecting a model
+                model = genai.GenerativeModel('gemini-2.5-flash') # Or 'gemini-1.5-pro' depending on what's available
+                response = model.generate_content(prompt)
+                st.markdown(response.text)
             except Exception as e:
                 error_msg = str(e)
                 # Tangkapan error anti-panik untuk limit kuota Gemini API
                 if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
                     st.warning("⏳ **Sistem AI sedang sibuk (Limit Penggunaan).** Silakan tunggu sekitar 1 menit, lalu klik 'Kirim' lagi.")
                 else:
-                    st.error("❌ Gagal terhubung ke server AI. Pastikan internet Anda stabil atau API Key valid.")
+                    st.error(f"❌ Gagal terhubung ke server AI. Detail: {error_msg}")
 
 # ========= MAIN =========
 
 def main():
     df_filtered, filter_info = apply_filters(None)
-    client = get_gemini_client()
+    
+    # Initialize Gemini API configuration
+    is_genai_configured = get_gemini_client()
 
     st.sidebar.markdown("---")
     page = st.sidebar.radio("Navigasi", [
@@ -632,8 +643,7 @@ def main():
     elif page == "Data & Unduhan": page_data(df_filtered, filter_info)
     elif page == "Kualitas Data": page_quality(df_filtered)
     elif page == "Prediksi ML": page_ml(df_filtered, filter_info)
-    elif page == "Asisten AI": page_ai_assistant(df_filtered, filter_info, client)
+    elif page == "Asisten AI": page_ai_assistant(df_filtered, filter_info, is_genai_configured)
 
 if __name__ == "__main__":
     main()
-

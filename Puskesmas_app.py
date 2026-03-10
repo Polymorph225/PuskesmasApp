@@ -7,7 +7,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 # Library Machine Learning & AI
-import google.generativeai as genai # <--- UPDATED IMPORT
+import google.generativeai as genai
 from prophet import Prophet
 
 # ========== KONFIGURASI HALAMAN ==========
@@ -93,30 +93,25 @@ st.markdown(
 def get_gemini_client():
     api_key = None
     try:
-        # Check Streamlit secrets first
         api_key = st.secrets.get("GEMINI_API_KEY")
     except FileNotFoundError:
-        pass # Handle case where secrets.toml might not exist yet
+        pass
     except Exception as e:
         print(f"Error accessing secrets: {e}")
 
-    # Fallback to environment variables if not in secrets
     if not api_key:
         api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 
     if not api_key:
-        st.warning("API key Gemini belum diset. Fitur AI Chat mungkin tidak berfungsi. Pastikan Anda telah mengatur GEMINI_API_KEY di secrets.toml atau environment variable.")
-        return None
+        st.warning("⚠️ API key Gemini belum diset. Fitur AI Asisten tidak akan berfungsi. Pastikan Anda telah mengatur GEMINI_API_KEY.")
+        return False
 
     try:
-        # Correctly configure the generativeai library
         genai.configure(api_key=api_key)
-        # We don't return a 'client' object here like in some other SDKs, 
-        # we just return True to indicate successful configuration
         return True 
     except Exception as e:
         st.error(f"Gagal inisialisasi Gemini API: {e}")
-        return None
+        return False
 
 # ================== DATA CLEANING HELPER ==================
 
@@ -503,6 +498,11 @@ def page_ml(df_filtered, filter_info):
     weekly = df_item.groupby(pd.Grouper(key="tanggal_kunjungan", freq="W-MON")).size().reset_index(name="jumlah")
     df_prophet = weekly.rename(columns={"tanggal_kunjungan": "ds", "jumlah": "y"})
 
+    # --- FITUR TRANSPARANSI DATA ML ---
+    with st.expander(f"👁️ Lihat Data Rekap yang Sedang Dipelajari AI", expanded=False):
+        st.markdown(f"Untuk memprediksi tren **{pilihan_item}**, AI Prophet membaca tabel rekapitulasi data per minggu di bawah ini sebagai bahan pembelajarannya:")
+        st.dataframe(df_prophet.rename(columns={"ds": "Periode (Minggu)", "y": "Jumlah Pasien"}), use_container_width=True)
+
     with st.spinner('AI Prophet sedang memproses pola peramalan...'):
         model = Prophet(yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False, interval_width=0.80)
         model.fit(df_prophet)
@@ -594,26 +594,87 @@ def page_quality(df):
     st.write("Missing Values:")
     st.dataframe(df.isna().sum().to_frame("Missing Count"))
 
+# ================== HALAMAN ASISTEN AI (DIPERBARUI DGN TRANSPARANSI) ==================
 def page_ai_assistant(df_filtered, filter_info, is_genai_configured):
-    st.subheader("🤖 Asisten AI")
-    if df_filtered is None: return
+    st.subheader("🤖 Asisten AI Cerdas")
+    
+    if df_filtered is None or df_filtered.empty: 
+        st.warning("⚠️ Data belum ada atau kosong. Silakan upload dan filter data terlebih dahulu di panel kiri.")
+        return
     if not is_genai_configured: 
-        st.error("API Key belum diset. Asisten AI tidak dapat digunakan.")
+        st.error("❌ API Key belum diset. Asisten AI tidak dapat digunakan.")
         return
 
-    user_q = st.text_area("Tanya AI tentang data ini:", placeholder="Saran program untuk diagnosa terbanyak?")
-    if st.button("Kirim"):
-        context = f"Total data: {len(df_filtered)}. Top Poli: {df_filtered['poli'].mode()[0] if 'poli' in df_filtered else '-'}"
-        prompt = f"Sebagai analis kesehatan. Data: {context}. Pertanyaan: {user_q}"
-        with st.spinner("Berpikir..."):
+    # --- 1. AI MERANGKUM DATA STATISTIK SAAT INI ---
+    total_data = len(df_filtered)
+    
+    top_diagnosa = "-"
+    if "diagnosa" in df_filtered.columns:
+        top_diagnosa_series = df_filtered["diagnosa"].value_counts().head(5)
+        top_diagnosa = ", ".join([f"{k} ({v} kasus)" for k, v in top_diagnosa_series.items()])
+        
+    top_poli = "-"
+    if "poli" in df_filtered.columns:
+        top_poli_series = df_filtered["poli"].value_counts().head(3)
+        top_poli = ", ".join([f"{k} ({v} kunjungan)" for k, v in top_poli_series.items()])
+        
+    gender = df_filtered['jenis_kelamin'].mode()[0] if 'jenis_kelamin' in df_filtered.columns and not df_filtered['jenis_kelamin'].dropna().empty else "-"
+    umur = df_filtered['kelompok_umur'].mode()[0] if 'kelompok_umur' in df_filtered.columns and not df_filtered['kelompok_umur'].dropna().empty else "-"
+    
+    desa = "-"
+    if "desa" in df_filtered.columns:
+        desa_series = df_filtered["desa"].value_counts().head(3)
+        desa = ", ".join([f"{k} ({v} pasien)" for k, v in desa_series.items()])
+
+    # Menyusun rangkuman data untuk dikirim ke otak AI secara tersembunyi
+    context_summary = f"""[STATISTIK DATA PASIEN SAAT INI]
+- Total Pasien/Kunjungan: {total_data}
+- 5 Penyakit Terbanyak: {top_diagnosa}
+- 3 Poli Terpadat: {top_poli}
+- Demografi Mayoritas: Jenis Kelamin {gender}, Kelompok Usia {umur}
+- 3 Desa Asal Pasien Terbanyak: {desa}"""
+
+    # --- 2. FITUR TRANSPARANSI (TAMPILAN PENGGUNA) ---
+    with st.expander("👁️ Lihat Konteks Data yang Akan Dikirim ke AI", expanded=False):
+        st.markdown("Di balik layar, aplikasi akan menyisipkan ringkasan teks ini kepada AI agar jawaban yang diberikan akurat dan sesuai dengan kondisi Puskesmas berdasarkan filter Anda saat ini:")
+        st.code(context_summary, language="markdown")
+
+    st.info("💡 **Tips:** Coba tanyakan: *"Berdasarkan data penyakit terbanyak saat ini, program promkes desa apa yang paling mendesak?"* atau *"Apa obat yang perlu saya siapkan lebih banyak bulan ini?"*")
+
+    user_q = st.text_area("Tanyakan strategi/analisis kesehatan:", placeholder="Ketik pertanyaan Anda di sini...")
+    
+    if st.button("Kirim Pertanyaan"):
+        if not user_q.strip():
+            st.warning("Pertanyaan tidak boleh kosong.")
+            return
+
+        # Menggabungkan data statistik + Persona AI + Pertanyaan Pengguna
+        prompt = f"""Anda adalah Analis Data dan Ahli Kesehatan Masyarakat profesional di UPT Puskesmas Purwosari (Bojonegoro). 
+        Berikut adalah ringkasan data pasien secara real-time berdasarkan filter yang sedang aktif di aplikasi:
+        
+        {context_summary}
+        
+        Tugas Anda: Jawablah pertanyaan pengguna di bawah ini secara spesifik, berbasis pada data di atas, praktis, dan terstruktur. Jangan berhalusinasi, gunakan angka-angka di atas sebagai landasan argumen Anda.
+        
+        Pertanyaan Pengguna: {user_q}
+        """
+        
+        with st.spinner("🤖 AI sedang menganalisis data dan merumuskan jawaban..."):
             try:
-                # Use the genai module directly, selecting a model
-                model = genai.GenerativeModel('gemini-2.5-flash') # Or 'gemini-1.5-pro' depending on what's available
+                # Memanggil model Gemini
+                model = genai.GenerativeModel('gemini-2.5-flash') 
                 response = model.generate_content(prompt)
-                st.markdown(response.text)
+                
+                # Menampilkan Hasil
+                st.markdown("### 📊 Analisis AI:")
+                st.markdown(f"""
+                <div style="padding: 1.5rem; border-radius: 0.5rem; background-color: var(--secondary-background-color); border: 1px solid rgba(148, 163, 184, 0.4);">
+                    {response.text}
+                </div>
+                """, unsafe_allow_html=True)
+
             except Exception as e:
                 error_msg = str(e)
-                # Tangkapan error anti-panik untuk limit kuota Gemini API
                 if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
                     st.warning("⏳ **Sistem AI sedang sibuk (Limit Penggunaan).** Silakan tunggu sekitar 1 menit, lalu klik 'Kirim' lagi.")
                 else:

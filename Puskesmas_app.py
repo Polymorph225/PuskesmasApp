@@ -47,22 +47,18 @@ def inject_custom_css():
         
         hr { margin: 0.75rem 0 1rem 0; }
         
-        /* ==============================================
-           KELAS KHUSUS UNTUK TEKS ESTIMASI PROPHET
-           ============================================== */
+        /* KELAS KHUSUS UNTUK TEKS ESTIMASI PROPHET */
         .highlight-estimasi {
-            color: #1d4ed8 !important; /* Selalu warna Biru Tua/Tegas di mode terang maupun gelap */
+            color: #1d4ed8 !important; 
             line-height: 1.5;
             font-size: 1.05rem;
-            font-weight: 800; /* Ditebalkan maksimal agar stroke lebih terlihat jelas */
-            
-            /* Efek Stroke Warna Putih di sekeliling huruf */
+            font-weight: 800; 
             text-shadow: 
                 -1px -1px 0 #ffffff,  
                  1px -1px 0 #ffffff,
                 -1px  1px 0 #ffffff,
                  1px  1px 0 #ffffff,
-                 0px  0px  5px rgba(255,255,255,0.8); /* Tambahan pendaran cahaya putih di belakangnya */
+                 0px  0px  5px rgba(255,255,255,0.8); 
         }
         </style>
         """,
@@ -97,13 +93,13 @@ def get_gemini_client():
     except FileNotFoundError:
         pass
     except Exception as e:
-        print(f"Error accessing secrets: {e}")
+        pass
 
     if not api_key:
         api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 
     if not api_key:
-        st.warning("⚠️ API key Gemini belum diset. Fitur AI Asisten tidak akan berfungsi. Pastikan Anda telah mengatur GEMINI_API_KEY.")
+        st.warning("⚠️ API key Gemini belum diset. Fitur AI Asisten tidak akan berfungsi.")
         return False
 
     try:
@@ -331,7 +327,7 @@ def page_penyakit(df_filtered, filter_info):
         top_n = st.slider("Jumlah diagnosa", 5, 20, 10)
         st.bar_chart(df_filtered["diagnosa"].value_counts().head(top_n))
 
-# ================== HALAMAN PETA ==================
+# ================== HALAMAN PETA (UPDATE KLIK INTERAKTIF) ==================
 def page_peta_persebaran(df_filtered, filter_info):
     st.subheader("🗺️ Peta Persebaran Penyakit")
     show_active_filters(filter_info)
@@ -406,7 +402,7 @@ def page_peta_persebaran(df_filtered, filter_info):
 
     st.markdown(f"**Menampilkan persebaran pasien untuk:** `{pilihan_penyakit}`")
 
-    # RENDER PETA PLOTLY
+    # RENDER PETA PLOTLY DENGAN PARAMETER CUSTOM_DATA UNTUK FITUR KLIK
     fig = px.scatter_mapbox(
         df_grouped, 
         lat="latitude", 
@@ -414,7 +410,8 @@ def page_peta_persebaran(df_filtered, filter_info):
         color="diagnosa",
         size="jumlah_kasus",
         hover_name="desa",
-        hover_data={"latitude": False, "longitude": False, "diagnosa": True, "jumlah_kasus": True},
+        custom_data=["desa"], # Data rahasia yang dikirim saat user mengklik
+        hover_data={"latitude": False, "longitude": False, "diagnosa": True, "jumlah_kasus": True, "desa": False},
         color_discrete_sequence=px.colors.qualitative.Plotly, 
         zoom=11.5, 
         center={"lat": -7.218, "lon": 111.675}, 
@@ -424,17 +421,73 @@ def page_peta_persebaran(df_filtered, filter_info):
     
     fig.update_layout(mapbox_style=map_style)
     fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
-    st.plotly_chart(fig, use_container_width=True)
     
-    col_tabel, col_grafik = st.columns([1, 1])
-    with col_tabel:
-        st.markdown("#### 📋 Detail Kasus per Desa")
-        st.dataframe(df_grouped[["desa", "diagnosa", "jumlah_kasus"]].sort_values(by="jumlah_kasus", ascending=False), use_container_width=True, hide_index=True)
+    # ------------------------------------------------------------
+    # LOGIKA KLIK PETA (INTERAKTIF)
+    # ------------------------------------------------------------
+    clicked_desa = None
+    try:
+        # Untuk Streamlit versi 1.35 ke atas
+        event = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
+        if hasattr(event, "selection") and hasattr(event.selection, "points") and len(event.selection.points) > 0:
+            point = event.selection.points[0]
+            if "customdata" in point:
+                clicked_desa = point["customdata"][0]
+            elif "hovertext" in point:
+                clicked_desa = point["hovertext"]
+    except TypeError:
+        # Fallback jika server masih pakai Streamlit versi lama
+        st.plotly_chart(fig, use_container_width=True)
+        pilihan_fallback = st.selectbox("Pilih Desa untuk melihat statistik spesifik:", options=["-- Klik Pilih --"] + sorted(df_filtered["desa"].dropna().unique().tolist()))
+        if pilihan_fallback != "-- Klik Pilih --":
+            clicked_desa = pilihan_fallback
 
-    with col_grafik:
-        st.markdown("#### 📊 Top Desa Terdampak")
-        top_desa_df = df_grouped.groupby("desa")["jumlah_kasus"].sum().reset_index().sort_values("jumlah_kasus", ascending=False).head(10)
-        st.bar_chart(top_desa_df.set_index("desa")["jumlah_kasus"])
+    # TAMPILAN PANEL BAWAH: Jika desa diklik, munculkan analitik desa tersebut
+    if clicked_desa:
+        st.markdown("---")
+        st.markdown(f"### 📍 Profil Kesehatan Desa: **{clicked_desa}**")
+        
+        # Saring data master (df_filtered) khusus untuk desa yang diklik saja
+        df_desa = df_filtered[df_filtered["desa"] == clicked_desa]
+        
+        if len(df_desa) > 0:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Total Kunjungan", f"{len(df_desa)} Pasien")
+            
+            penyakit_terbanyak = df_desa["diagnosa"].mode()[0] if "diagnosa" in df_desa.columns and not df_desa["diagnosa"].empty else "-"
+            c2.metric("Penyakit Dominan", penyakit_terbanyak)
+            
+            if "jenis_kelamin" in df_desa.columns:
+                mayoritas_gender = df_desa["jenis_kelamin"].mode()[0] if not df_desa["jenis_kelamin"].empty else "-"
+                c3.metric("Mayoritas Gender", mayoritas_gender)
+            
+            col_d1, col_d2 = st.columns(2)
+            with col_d1:
+                st.markdown("**Top 5 Penyakit Terbanyak**")
+                st.bar_chart(df_desa["diagnosa"].value_counts().head(5))
+            with col_d2:
+                st.markdown("**Demografi Usia Pasien**")
+                if "kelompok_umur" in df_desa.columns:
+                    st.bar_chart(df_desa["kelompok_umur"].value_counts().sort_index())
+                    
+        else:
+            st.warning(f"Data tidak tersedia untuk desa {clicked_desa}.")
+            
+        st.caption("ℹ️ *Klik pada area kosong di peta atau klik ulang titik desa untuk menutup profil ini.*")
+        
+    else:
+        # Tampilan Standar jika tidak ada desa yang diklik
+        st.info("👆 **TIPS INTERAKTIF:** Klik pada salah satu titik/lingkaran desa di peta untuk melihat profil statistik kesehatannya secara langsung!")
+        
+        col_tabel, col_grafik = st.columns([1, 1])
+        with col_tabel:
+            st.markdown("#### 📋 Detail Kasus per Desa")
+            st.dataframe(df_grouped[["desa", "diagnosa", "jumlah_kasus"]].sort_values(by="jumlah_kasus", ascending=False), use_container_width=True, hide_index=True)
+
+        with col_grafik:
+            st.markdown("#### 📊 Top Desa Terdampak")
+            top_desa_df = df_grouped.groupby("desa")["jumlah_kasus"].sum().reset_index().sort_values("jumlah_kasus", ascending=False).head(10)
+            st.bar_chart(top_desa_df.set_index("desa")["jumlah_kasus"])
 
 def page_pembiayaan(df_filtered, filter_info):
     st.subheader("💳 Analisis Pembiayaan")
@@ -498,7 +551,7 @@ def page_ml(df_filtered, filter_info):
     weekly = df_item.groupby(pd.Grouper(key="tanggal_kunjungan", freq="W-MON")).size().reset_index(name="jumlah")
     df_prophet = weekly.rename(columns={"tanggal_kunjungan": "ds", "jumlah": "y"})
 
-    # --- FITUR TRANSPARANSI DATA ML ---
+    # Fitur Transparansi Tabel Data
     with st.expander(f"👁️ Lihat Data Rekap yang Sedang Dipelajari AI", expanded=False):
         st.markdown(f"Untuk memprediksi tren **{pilihan_item}**, AI Prophet membaca tabel rekapitulasi data per minggu di bawah ini sebagai bahan pembelajarannya:")
         st.dataframe(df_prophet.rename(columns={"ds": "Periode (Minggu)", "y": "Jumlah Pasien"}), use_container_width=True)
@@ -564,7 +617,6 @@ def page_ml(df_filtered, filter_info):
 
         col_alert, col_metric1, col_metric2 = st.columns([2, 1, 1])
         with col_alert:
-            # Menggunakan CSS class `.highlight-estimasi` (warna biru tua, tebal, stroke tepi putih)
             st.markdown(f"""
                 <div style="padding: 1rem; border-radius: 0.5rem; background-color: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); margin-bottom: 1rem;">
                     <div class="highlight-estimasi">
@@ -594,7 +646,7 @@ def page_quality(df):
     st.write("Missing Values:")
     st.dataframe(df.isna().sum().to_frame("Missing Count"))
 
-# ================== HALAMAN ASISTEN AI (DIPERBARUI DGN TRANSPARANSI) ==================
+# ================== HALAMAN ASISTEN AI ==================
 def page_ai_assistant(df_filtered, filter_info, is_genai_configured):
     st.subheader("🤖 Asisten AI Cerdas")
     
@@ -648,7 +700,6 @@ def page_ai_assistant(df_filtered, filter_info, is_genai_configured):
             st.warning("Pertanyaan tidak boleh kosong.")
             return
 
-        # Menggabungkan data statistik + Persona AI + Pertanyaan Pengguna
         prompt = f"""Anda adalah Analis Data dan Ahli Kesehatan Masyarakat profesional di UPT Puskesmas Purwosari (Bojonegoro). 
         Berikut adalah ringkasan data pasien secara real-time berdasarkan filter yang sedang aktif di aplikasi:
         
@@ -708,4 +759,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -47,18 +47,22 @@ def inject_custom_css():
         
         hr { margin: 0.75rem 0 1rem 0; }
         
-        /* KELAS KHUSUS UNTUK TEKS ESTIMASI PROPHET */
+        /* ==============================================
+           KELAS KHUSUS UNTUK TEKS ESTIMASI PROPHET
+           ============================================== */
         .highlight-estimasi {
-            color: #1d4ed8 !important; 
+            color: #1d4ed8 !important; /* Selalu warna Biru Tua/Tegas di mode terang maupun gelap */
             line-height: 1.5;
             font-size: 1.05rem;
-            font-weight: 800; 
+            font-weight: 800; /* Ditebalkan maksimal agar stroke lebih terlihat jelas */
+            
+            /* Efek Stroke Warna Putih di sekeliling huruf */
             text-shadow: 
                 -1px -1px 0 #ffffff,  
                  1px -1px 0 #ffffff,
                 -1px  1px 0 #ffffff,
                  1px  1px 0 #ffffff,
-                 0px  0px  5px rgba(255,255,255,0.8); 
+                 0px  0px  5px rgba(255,255,255,0.8); /* Tambahan pendaran cahaya putih di belakangnya */
         }
         </style>
         """,
@@ -99,7 +103,7 @@ def get_gemini_client():
         api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 
     if not api_key:
-        st.warning("⚠️ API key Gemini belum diset. Fitur AI Agent tidak akan berfungsi. Pastikan Anda telah mengatur GEMINI_API_KEY.")
+        st.warning("⚠️ API key Gemini belum diset. Fitur AI Asisten tidak akan berfungsi. Pastikan Anda telah mengatur GEMINI_API_KEY.")
         return False
 
     try:
@@ -327,6 +331,7 @@ def page_penyakit(df_filtered, filter_info):
         top_n = st.slider("Jumlah diagnosa", 5, 20, 10)
         st.bar_chart(df_filtered["diagnosa"].value_counts().head(top_n))
 
+# ================== HALAMAN PETA ==================
 def page_peta_persebaran(df_filtered, filter_info):
     st.subheader("🗺️ Peta Persebaran Penyakit")
     show_active_filters(filter_info)
@@ -421,6 +426,7 @@ def page_peta_persebaran(df_filtered, filter_info):
     fig.update_layout(mapbox_style=map_style)
     fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
     
+    # Menangkap event klik dari peta
     clicked_desa = None
     try:
         event = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
@@ -436,6 +442,7 @@ def page_peta_persebaran(df_filtered, filter_info):
         if pilihan_fallback != "-- Klik Pilih --":
             clicked_desa = pilihan_fallback
 
+    # Menampilkan Info Klik (Opsional)
     st.info("👆 **TIPS INTERAKTIF:** Klik pada salah satu titik/lingkaran desa di peta untuk melihat profil statistik kesehatannya secara langsung!")
 
     # JIKA DESA DIKLIK, TAMPILKAN PROFIL DESA TERSEBUT
@@ -464,12 +471,13 @@ def page_peta_persebaran(df_filtered, filter_info):
                 st.markdown("**Demografi Usia Pasien**")
                 if "kelompok_umur" in df_desa.columns:
                     st.bar_chart(df_desa["kelompok_umur"].value_counts().sort_index())
+                    
         else:
             st.warning(f"Data tidak tersedia untuk desa {clicked_desa}.")
             
         st.caption("ℹ️ *Klik pada area kosong di peta atau klik ulang titik desa untuk menutup profil ini.*")
         
-    # TABEL DAN GRAFIK GLOBAL SELALU TAMPIL DI BAWAH PETA
+    # TABEL DAN GRAFIK GLOBAL SEKARANG SELALU TAMPIL DI BAWAH PETA
     st.markdown("---")
     col_tabel, col_grafik = st.columns([1, 1])
     
@@ -487,6 +495,7 @@ def page_pembiayaan(df_filtered, filter_info):
     if df_filtered is None or "pembiayaan" not in df_filtered.columns: return
     st.bar_chart(df_filtered["pembiayaan"].value_counts())
 
+# ================== HALAMAN ML (FACEBOOK PROPHET) ==================
 def page_ml(df_filtered, filter_info):
     st.subheader("📈 Prediksi & Peramalan Tren (Facebook Prophet)")
     show_active_filters(filter_info)
@@ -499,6 +508,7 @@ def page_ml(df_filtered, filter_info):
         st.error("❌ Kolom 'tanggal_kunjungan' tidak ditemukan.")
         return
 
+    # Filter data ML
     df_ml = df_filtered.copy()
     if not pd.api.types.is_datetime64_any_dtype(df_ml["tanggal_kunjungan"]):
         df_ml["tanggal_kunjungan"] = pd.to_datetime(df_ml["tanggal_kunjungan"], errors="coerce")
@@ -529,7 +539,7 @@ def page_ml(df_filtered, filter_info):
                 "Prediksi Sampai Tanggal:", 
                 value=max_date + pd.Timedelta(days=30), 
                 min_value=max_date + pd.Timedelta(days=1),
-                max_value=max_date + pd.Timedelta(days=365)
+                max_value=max_date + pd.Timedelta(days=365) # Maks 1 tahun
             )
 
     df_item = df_ml[df_ml[kolom_fokus] == pilihan_item].copy()
@@ -538,6 +548,7 @@ def page_ml(df_filtered, filter_info):
         st.error("❌ Data terlalu sedikit (< 10 pasien) untuk dipelajari oleh AI Prophet.")
         return
 
+    # ================= LOGIKA PROPHET =================
     weekly = df_item.groupby(pd.Grouper(key="tanggal_kunjungan", freq="W-MON")).size().reset_index(name="jumlah")
     df_prophet = weekly.rename(columns={"tanggal_kunjungan": "ds", "jumlah": "y"})
 
@@ -560,12 +571,14 @@ def page_ml(df_filtered, filter_info):
     st.markdown(f"### 📈 Grafik Peramalan: **{pilihan_item}**")
     fig = go.Figure()
 
+    # Data Aktual
     fig.add_trace(go.Scatter(
         x=df_prophet['ds'], y=df_prophet['y'], 
         mode='lines+markers', name='Data Aktual',
         line=dict(color='#2563eb', width=2)
     ))
 
+    # Prediksi Masa Depan
     forecast_future = forecast[forecast['ds'] > pd.to_datetime(last_date)]
     fig.add_trace(go.Scatter(
         x=forecast_future['ds'], y=forecast_future['yhat'], 
@@ -573,6 +586,7 @@ def page_ml(df_filtered, filter_info):
         line=dict(color='#ef4444', width=3, dash='dash')
     ))
 
+    # Confidence Interval
     fig.add_trace(go.Scatter(
         x=forecast_future['ds'].tolist() + forecast_future['ds'].tolist()[::-1],
         y=forecast_future['yhat_upper'].tolist() + forecast_future['yhat_lower'].tolist()[::-1],
@@ -589,6 +603,7 @@ def page_ml(df_filtered, filter_info):
     )
     st.plotly_chart(fig, use_container_width=True)
 
+    # ================= KESIMPULAN ESTIMASI DENGAN CUSTOM HTML/CSS =================
     st.markdown(f"### 📢 Kesimpulan Estimasi Hingga {pd.to_datetime(target_date).strftime('%d %B %Y')}")
     if not forecast_future.empty:
         total_estimasi = int(round(forecast_future["yhat"].clip(lower=0).sum()))
@@ -631,10 +646,9 @@ def page_quality(df):
     st.write("Missing Values:")
     st.dataframe(df.isna().sum().to_frame("Missing Count"))
 
-# ================== HALAMAN AI AGENT CHATBOT ==================
-def page_ai_agent(df_filtered, filter_info, is_genai_configured):
-    st.subheader("🤖 AI Agent Cerdas")
-    st.markdown("Saya adalah asisten virtual yang memahami data pasien Anda. Tanyakan apa saja seputar insight, saran promosi kesehatan, atau kebutuhan logistik.")
+# ================== HALAMAN ASISTEN AI ==================
+def page_ai_assistant(df_filtered, filter_info, is_genai_configured):
+    st.subheader("🤖 Asisten AI Cerdas")
     
     if df_filtered is None or df_filtered.empty: 
         st.warning("⚠️ Data belum ada atau kosong. Silakan upload dan filter data terlebih dahulu di panel kiri.")
@@ -643,102 +657,83 @@ def page_ai_agent(df_filtered, filter_info, is_genai_configured):
         st.error("❌ API Key belum diset. Asisten AI tidak dapat digunakan.")
         return
 
-    # 1. Menarik Rangkuman Metrik Data
+    # --- 1. AI MERANGKUM DATA STATISTIK SAAT INI ---
     total_data = len(df_filtered)
-    top_diagnosa = ", ".join([f"{k} ({v} kasus)" for k, v in df_filtered["diagnosa"].value_counts().head(5).items()]) if "diagnosa" in df_filtered.columns else "-"
-    top_poli = ", ".join([f"{k} ({v} kunjungan)" for k, v in df_filtered["poli"].value_counts().head(3).items()]) if "poli" in df_filtered.columns else "-"
+    
+    top_diagnosa = "-"
+    if "diagnosa" in df_filtered.columns:
+        top_diagnosa_series = df_filtered["diagnosa"].value_counts().head(5)
+        top_diagnosa = ", ".join([f"{k} ({v} kasus)" for k, v in top_diagnosa_series.items()])
+        
+    top_poli = "-"
+    if "poli" in df_filtered.columns:
+        top_poli_series = df_filtered["poli"].value_counts().head(3)
+        top_poli = ", ".join([f"{k} ({v} kunjungan)" for k, v in top_poli_series.items()])
+        
     gender = df_filtered['jenis_kelamin'].mode()[0] if 'jenis_kelamin' in df_filtered.columns and not df_filtered['jenis_kelamin'].dropna().empty else "-"
     umur = df_filtered['kelompok_umur'].mode()[0] if 'kelompok_umur' in df_filtered.columns and not df_filtered['kelompok_umur'].dropna().empty else "-"
-    desa = ", ".join([f"{k} ({v} pasien)" for k, v in df_filtered["desa"].value_counts().head(3).items()]) if "desa" in df_filtered.columns else "-"
+    
+    desa = "-"
+    if "desa" in df_filtered.columns:
+        desa_series = df_filtered["desa"].value_counts().head(3)
+        desa = ", ".join([f"{k} ({v} pasien)" for k, v in desa_series.items()])
 
-    context_summary = f"""[STATISTIK DATA PASIEN SAAT INI BERDASARKAN FILTER]
-- Total Kunjungan: {total_data}
+    # Menyusun rangkuman data untuk dikirim ke otak AI secara tersembunyi
+    context_summary = f"""[STATISTIK DATA PASIEN SAAT INI]
+- Total Pasien/Kunjungan: {total_data}
 - 5 Penyakit Terbanyak: {top_diagnosa}
 - 3 Poli Terpadat: {top_poli}
-- Demografi Mayoritas: Kelamin {gender}, Usia {umur}
-- 3 Wilayah Pasien Terbanyak: {desa}"""
+- Demografi Mayoritas: Jenis Kelamin {gender}, Kelompok Usia {umur}
+- 3 Desa Asal Pasien Terbanyak: {desa}"""
 
-    with st.expander("👁️ Lihat Data yang Diketahui AI Agent", expanded=False):
+    # --- 2. FITUR TRANSPARANSI ---
+    with st.expander("👁️ Lihat Konteks Data yang Akan Dikirim ke AI", expanded=False):
+        st.markdown("Di balik layar, aplikasi akan menyisipkan ringkasan teks ini kepada AI agar jawaban yang diberikan akurat dan sesuai dengan kondisi Puskesmas berdasarkan filter Anda saat ini:")
         st.code(context_summary, language="markdown")
 
-    # 2. Inisialisasi State (Memori Chat dan State Tombol)
-    if "messages" not in st.session_state:
-        st.session_state.messages = [
-            {"role": "assistant", "content": "Halo! Saya sudah menganalisis data Puskesmas Anda saat ini. Ada yang bisa saya bantu?"}
-        ]
-    if "quick_prompt" not in st.session_state:
-        st.session_state.quick_prompt = None
+    st.info('💡 **Tips:** Coba tanyakan: *"Berdasarkan data penyakit terbanyak saat ini, program promkes desa apa yang paling mendesak?"* atau *"Apa obat yang perlu saya siapkan lebih banyak bulan ini?"*')
 
-    # 3. Fitur Tombol Cepat (Quick Prompts)
-    st.markdown("**Coba tanyakan dengan cepat:**")
-    col_btn1, col_btn2, col_btn3 = st.columns(3)
-    if col_btn1.button("📝 Buat Draf Penyuluhan"):
-        st.session_state.quick_prompt = "Buatkan draf materi penyuluhan singkat untuk warga desa berdasarkan penyakit yang paling banyak terjadi saat ini."
-    if col_btn2.button("💊 Saran Logistik Obat"):
-        st.session_state.quick_prompt = "Berdasarkan data penyakit saat ini, apa saja jenis obat primer yang stoknya harus saya siapkan lebih banyak?"
-    if col_btn3.button("📊 Analisis Target Usia"):
-        st.session_state.quick_prompt = "Tolong analisis kelompok usia pasien saat ini dan berikan saran program kesehatan apa yang cocok untuk mereka."
-
-    st.markdown("---")
-
-    # 4. Tampilan Riwayat Chat
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-    # 5. Logika Penerimaan Input (Dari Tombol ATAU dari Ketikan User)
-    user_input = st.chat_input("Ketik pesan atau instruksi untuk AI Agent...")
+    user_q = st.text_area("Tanyakan strategi/analisis kesehatan:", placeholder="Ketik pertanyaan Anda di sini...")
     
-    # Jika tombol cepat diklik, override user_input
-    if st.session_state.quick_prompt:
-        user_input = st.session_state.quick_prompt
-        st.session_state.quick_prompt = None # Reset state setelah dipakai
+    if st.button("Kirim Pertanyaan"):
+        if not user_q.strip():
+            st.warning("Pertanyaan tidak boleh kosong.")
+            return
 
-    # 6. Proses Tanya Jawab ke Gemini AI
-    if user_input:
-        # Tampilkan chat user
-        with st.chat_message("user"):
-            st.markdown(user_input)
-        # Simpan ke memori Streamlit
-        st.session_state.messages.append({"role": "user", "content": user_input})
+        prompt = f"""Anda adalah Analis Data dan Ahli Kesehatan Masyarakat profesional di UPT Puskesmas Purwosari (Bojonegoro). 
+        Berikut adalah ringkasan data pasien secara real-time berdasarkan filter yang sedang aktif di aplikasi:
+        
+        {context_summary}
+        
+        Tugas Anda: Jawablah pertanyaan pengguna di bawah ini secara spesifik, berbasis pada data di atas, praktis, dan terstruktur. Jangan berhalusinasi, gunakan angka-angka di atas sebagai landasan argumen Anda.
+        
+        Pertanyaan Pengguna: {user_q}
+        """
+        
+        with st.spinner("🤖 AI sedang menganalisis data dan merumuskan jawaban..."):
+            try:
+                model = genai.GenerativeModel('gemini-2.5-flash') 
+                response = model.generate_content(prompt)
+                
+                st.markdown("### 📊 Analisis AI:")
+                st.markdown(f"""
+                <div style="padding: 1.5rem; border-radius: 0.5rem; background-color: var(--secondary-background-color); border: 1px solid rgba(148, 163, 184, 0.4);">
+                    {response.text}
+                </div>
+                """, unsafe_allow_html=True)
 
-        # Render animasi berpikir dari AI
-        with st.chat_message("assistant"):
-            with st.spinner("AI Agent sedang berpikir dan menganalisis data..."):
-                try:
-                    model = genai.GenerativeModel('gemini-2.5-flash')
-                    
-                    # Menyusun konteks utuh: Data Statistik + Riwayat Chat (maks 4 chat terakhir) + Pertanyaan Baru
-                    history_text = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages[-5:-1]])
-                    
-                    full_prompt = f"""Anda adalah AI Agent dan Ahli Analis Data di UPT Puskesmas Purwosari (Bojonegoro).
-Anda harus menjawab secara profesional, berbasis data, ringkas, dan solutif.
-
-{context_summary}
-
-Riwayat Percakapan Terakhir:
-{history_text}
-
-Pertanyaan/Instruksi terbaru dari User:
-{user_input}
-"""
-                    response = model.generate_content(full_prompt)
-                    st.markdown(response.text)
-                    
-                    # Simpan jawaban AI ke memori
-                    st.session_state.messages.append({"role": "assistant", "content": response.text})
-                    
-                except Exception as e:
-                    error_msg = str(e)
-                    if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
-                        st.warning("⏳ **Sistem AI sedang sibuk (Limit Penggunaan).** Silakan tunggu sekitar 1 menit.")
-                    else:
-                        st.error(f"❌ Gagal terhubung ke server AI. Detail: {error_msg}")
+            except Exception as e:
+                error_msg = str(e)
+                if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+                    st.warning("⏳ **Sistem AI sedang sibuk (Limit Penggunaan).** Silakan tunggu sekitar 1 menit, lalu klik 'Kirim' lagi.")
+                else:
+                    st.error(f"❌ Gagal terhubung ke server AI. Detail: {error_msg}")
 
 # ========= MAIN =========
 
 def main():
     df_filtered, filter_info = apply_filters(None)
+    
     is_genai_configured = get_gemini_client()
 
     st.sidebar.markdown("---")
@@ -746,7 +741,7 @@ def main():
         "Ringkasan Umum", "Analisis Kunjungan", "Analisis Penyakit", 
         "Peta Persebaran",
         "Analisis Pembiayaan", "Data & Unduhan", "Kualitas Data", 
-        "Prediksi ML", "🤖 AI Agent Cerdas"
+        "Prediksi ML", "Asisten AI"
     ])
     
     if page == "Ringkasan Umum": page_overview(df_filtered, filter_info)
@@ -757,7 +752,7 @@ def main():
     elif page == "Data & Unduhan": page_data(df_filtered, filter_info)
     elif page == "Kualitas Data": page_quality(df_filtered)
     elif page == "Prediksi ML": page_ml(df_filtered, filter_info)
-    elif page == "🤖 AI Agent Cerdas": page_ai_agent(df_filtered, filter_info, is_genai_configured)
+    elif page == "Asisten AI": page_ai_assistant(df_filtered, filter_info, is_genai_configured)
 
 if __name__ == "__main__":
     main()

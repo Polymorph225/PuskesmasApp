@@ -51,18 +51,10 @@ def inject_custom_css():
            KELAS KHUSUS UNTUK TEKS ESTIMASI PROPHET
            ============================================== */
         .highlight-estimasi {
-            color: #1d4ed8 !important; /* Selalu warna Biru Tua/Tegas di mode terang maupun gelap */
+            color: #1d4ed8 !important; /* Warna Biru Tua/Tegas */
             line-height: 1.5;
             font-size: 1.05rem;
-            font-weight: 800; /* Ditebalkan maksimal agar stroke lebih terlihat jelas */
-            
-            /* Efek Stroke Warna Putih di sekeliling huruf */
-            text-shadow: 
-                -1px -1px 0 #ffffff,  
-                 1px -1px 0 #ffffff,
-                -1px  1px 0 #ffffff,
-                 1px  1px 0 #ffffff,
-                 0px  0px  5px rgba(255,255,255,0.8); /* Tambahan pendaran cahaya putih di belakangnya */
+            font-weight: 800; /* Teks ditebalkan */
         }
         </style>
         """,
@@ -495,9 +487,9 @@ def page_pembiayaan(df_filtered, filter_info):
     if df_filtered is None or "pembiayaan" not in df_filtered.columns: return
     st.bar_chart(df_filtered["pembiayaan"].value_counts())
 
-# ================== HALAMAN ML (FACEBOOK PROPHET) ==================
+# ================== HALAMAN ML (PROPHET) ==================
 def page_ml(df_filtered, filter_info):
-    st.subheader("📈 Prediksi & Peramalan Tren (Facebook Prophet)")
+    st.subheader("📈 Prediksi & Peramalan Tren (Prophet)")
     show_active_filters(filter_info)
 
     if df_filtered is None or len(df_filtered) == 0:
@@ -520,7 +512,7 @@ def page_ml(df_filtered, filter_info):
 
     max_date = df_ml["tanggal_kunjungan"].max().date()
 
-    st.info("💡 **Model:** Menggunakan Facebook Prophet untuk memprediksi tren dan estimasi jumlah kunjungan/kasus di masa depan.")
+    st.info("💡 **Model:** Menggunakan Prophet untuk memprediksi tren dan estimasi jumlah kunjungan/kasus di masa depan.")
     st.markdown("---")
 
     with st.container():

@@ -6,9 +6,11 @@ import re
 import plotly.express as px
 import plotly.graph_objects as go
 
-# Library Machine Learning & AI
+# Library Machine Learning & AI Agent
 import google.generativeai as genai
 from prophet import Prophet
+from pandasai import SmartDataframe
+from pandasai.llm import GoogleGemini
 
 # ========== KONFIGURASI HALAMAN ==========
 st.set_page_config(
@@ -47,9 +49,7 @@ def inject_custom_css():
         
         hr { margin: 0.75rem 0 1rem 0; }
         
-        /* ==============================================
-           KELAS KHUSUS UNTUK TEKS ESTIMASI PROPHET
-           ============================================== */
+        /* KELAS KHUSUS UNTUK TEKS ESTIMASI PROPHET */
         .highlight-estimasi {
             color: #1d4ed8 !important; /* Selalu warna Biru Tua/Tegas di mode terang maupun gelap */
             line-height: 1.5;
@@ -90,7 +90,7 @@ st.markdown(
 # ========= FUNGSI UTAMA PERSIAPAN DATA DAN AI =========
 
 @st.cache_resource
-def get_gemini_client():
+def get_gemini_api_key():
     api_key = None
     try:
         api_key = st.secrets.get("GEMINI_API_KEY")
@@ -101,16 +101,18 @@ def get_gemini_client():
 
     if not api_key:
         api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        
+    return api_key
 
+def check_gemini_config(api_key):
     if not api_key:
-        st.warning("⚠️ API key Gemini belum diset. Fitur AI Asisten tidak akan berfungsi. Pastikan Anda telah mengatur GEMINI_API_KEY.")
+        st.sidebar.warning("⚠️ API key Gemini belum diset. Fitur AI Asisten tidak akan berfungsi. Pastikan Anda telah mengatur GEMINI_API_KEY.")
         return False
-
     try:
         genai.configure(api_key=api_key)
         return True 
     except Exception as e:
-        st.error(f"Gagal inisialisasi Gemini API: {e}")
+        st.sidebar.error(f"Gagal inisialisasi Gemini API: {e}")
         return False
 
 # ================== DATA CLEANING HELPER ==================
@@ -406,7 +408,6 @@ def page_peta_persebaran(df_filtered, filter_info):
 
     st.markdown(f"**Menampilkan persebaran pasien untuk:** `{pilihan_penyakit}`")
 
-    # RENDER PETA PLOTLY DENGAN FITUR KLIK
     fig = px.scatter_mapbox(
         df_grouped, 
         lat="latitude", 
@@ -426,7 +427,6 @@ def page_peta_persebaran(df_filtered, filter_info):
     fig.update_layout(mapbox_style=map_style)
     fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
     
-    # Menangkap event klik dari peta
     clicked_desa = None
     try:
         event = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
@@ -442,10 +442,8 @@ def page_peta_persebaran(df_filtered, filter_info):
         if pilihan_fallback != "-- Klik Pilih --":
             clicked_desa = pilihan_fallback
 
-    # Menampilkan Info Klik (Opsional)
     st.info("👆 **TIPS INTERAKTIF:** Klik pada salah satu titik/lingkaran desa di peta untuk melihat profil statistik kesehatannya secara langsung!")
 
-    # JIKA DESA DIKLIK, TAMPILKAN PROFIL DESA TERSEBUT
     if clicked_desa:
         st.markdown("---")
         st.markdown(f"### 📍 Profil Kesehatan Desa: **{clicked_desa}**")
@@ -477,7 +475,6 @@ def page_peta_persebaran(df_filtered, filter_info):
             
         st.caption("ℹ️ *Klik pada area kosong di peta atau klik ulang titik desa untuk menutup profil ini.*")
         
-    # TABEL DAN GRAFIK GLOBAL SEKARANG SELALU TAMPIL DI BAWAH PETA
     st.markdown("---")
     col_tabel, col_grafik = st.columns([1, 1])
     
@@ -603,7 +600,7 @@ def page_ml(df_filtered, filter_info):
     )
     st.plotly_chart(fig, use_container_width=True)
 
-    # ================= KESIMPULAN ESTIMASI DENGAN CUSTOM HTML/CSS =================
+    # ================= KESIMPULAN ESTIMASI =================
     st.markdown(f"### 📢 Kesimpulan Estimasi Hingga {pd.to_datetime(target_date).strftime('%d %B %Y')}")
     if not forecast_future.empty:
         total_estimasi = int(round(forecast_future["yhat"].clip(lower=0).sum()))
@@ -646,102 +643,100 @@ def page_quality(df):
     st.write("Missing Values:")
     st.dataframe(df.isna().sum().to_frame("Missing Count"))
 
-# ================== HALAMAN ASISTEN AI ==================
-def page_ai_assistant(df_filtered, filter_info, is_genai_configured):
-    st.subheader("🤖 Asisten AI Cerdas")
+# ================== HALAMAN ASISTEN AI AGENT (PANDASAI) ==================
+def page_ai_assistant(df_filtered, filter_info, is_genai_configured, api_key):
+    st.subheader("🤖 Agen AI Data Analis")
     
     if df_filtered is None or df_filtered.empty: 
-        st.warning("⚠️ Data belum ada atau kosong. Silakan upload dan filter data terlebih dahulu di panel kiri.")
+        st.warning("⚠️ Data belum ada atau kosong. Silakan upload data terlebih dahulu di panel kiri.")
         return
-    if not is_genai_configured: 
+    if not is_genai_configured or not api_key: 
         st.error("❌ API Key belum diset. Asisten AI tidak dapat digunakan.")
         return
 
-    # --- 1. AI MERANGKUM DATA STATISTIK SAAT INI ---
-    total_data = len(df_filtered)
+    st.info("💡 **Panduan:** Agen AI ini tidak hanya menjawab teks biasa, tetapi dapat **membaca, menghitung, dan menganalisis tabel data Anda secara langsung**. Tanyakan apa saja mengenai data yang telah Anda filter!")
+
+    # Inisialisasi Model PandasAI menggunakan Gemini
+    llm = GoogleGemini(api_key=api_key)
     
-    top_diagnosa = "-"
-    if "diagnosa" in df_filtered.columns:
-        top_diagnosa_series = df_filtered["diagnosa"].value_counts().head(5)
-        top_diagnosa = ", ".join([f"{k} ({v} kasus)" for k, v in top_diagnosa_series.items()])
-        
-    top_poli = "-"
-    if "poli" in df_filtered.columns:
-        top_poli_series = df_filtered["poli"].value_counts().head(3)
-        top_poli = ", ".join([f"{k} ({v} kunjungan)" for k, v in top_poli_series.items()])
-        
-    gender = df_filtered['jenis_kelamin'].mode()[0] if 'jenis_kelamin' in df_filtered.columns and not df_filtered['jenis_kelamin'].dropna().empty else "-"
-    umur = df_filtered['kelompok_umur'].mode()[0] if 'kelompok_umur' in df_filtered.columns and not df_filtered['kelompok_umur'].dropna().empty else "-"
+    # Konversi dataframe Pandas biasa menjadi SmartDataframe dari PandasAI
+    # Kita hanya berikan kolom penting agar komputasi AI lebih cepat dan akurat
+    kolom_penting = [c for c in ["tanggal_kunjungan", "umur", "jenis_kelamin", "poli", "diagnosa", "pembiayaan", "desa"] if c in df_filtered.columns]
+    df_for_ai = df_filtered[kolom_penting].copy()
     
-    desa = "-"
-    if "desa" in df_filtered.columns:
-        desa_series = df_filtered["desa"].value_counts().head(3)
-        desa = ", ".join([f"{k} ({v} pasien)" for k, v in desa_series.items()])
+    sdf = SmartDataframe(df_for_ai, config={"llm": llm, "enable_cache": False})
 
-    # Menyusun rangkuman data untuk dikirim ke otak AI secara tersembunyi
-    context_summary = f"""[STATISTIK DATA PASIEN SAAT INI]
-- Total Pasien/Kunjungan: {total_data}
-- 5 Penyakit Terbanyak: {top_diagnosa}
-- 3 Poli Terpadat: {top_poli}
-- Demografi Mayoritas: Jenis Kelamin {gender}, Kelompok Usia {umur}
-- 3 Desa Asal Pasien Terbanyak: {desa}"""
-
-    # --- 2. FITUR TRANSPARANSI ---
-    with st.expander("👁️ Lihat Konteks Data yang Akan Dikirim ke AI", expanded=False):
-        st.markdown("Di balik layar, aplikasi akan menyisipkan ringkasan teks ini kepada AI agar jawaban yang diberikan akurat dan sesuai dengan kondisi Puskesmas berdasarkan filter Anda saat ini:")
-        st.code(context_summary, language="markdown")
-
-    st.info('💡 **Tips:** Coba tanyakan: *"Berdasarkan data penyakit terbanyak saat ini, program promkes desa apa yang paling mendesak?"* atau *"Apa obat yang perlu saya siapkan lebih banyak bulan ini?"*')
-
-    user_q = st.text_area("Tanyakan strategi/analisis kesehatan:", placeholder="Ketik pertanyaan Anda di sini...")
+    # Fitur Quick Prompts
+    st.markdown("**Coba Pertanyaan Ini:**")
+    col_p1, col_p2, col_p3 = st.columns(3)
     
-    if st.button("Kirim Pertanyaan"):
+    if "quick_prompt" not in st.session_state:
+        st.session_state.quick_prompt = ""
+
+    with col_p1:
+        if st.button("📊 Siapa pasien tertua dan termuda?"):
+            st.session_state.quick_prompt = "Siapa pasien tertua dan termuda berdasarkan usianya? Sebutkan umurnya."
+    with col_p2:
+        if st.button("📍 Dari desa mana pasien paling banyak?"):
+            st.session_state.quick_prompt = "Dari desa mana pasien paling banyak berasal? Tampilkan 3 desa teratas beserta jumlah pasiennya."
+    with col_p3:
+        if st.button("📋 Penyakit dominan di Poli KIA?"):
+            st.session_state.quick_prompt = "Apa 3 diagnosa penyakit paling dominan yang ditangani di Poli KIA?"
+
+    # Input User
+    user_q = st.text_area("Tanyakan pertanyaan spesifik tentang data Anda:", value=st.session_state.quick_prompt, placeholder="Contoh: Berapa persen pasien yang menggunakan pembiayaan JKN dibandingkan pasien Umum?")
+    
+    if st.button("Minta AI Menganalisis"):
         if not user_q.strip():
             st.warning("Pertanyaan tidak boleh kosong.")
             return
 
-        prompt = f"""Anda adalah Analis Data dan Ahli Kesehatan Masyarakat profesional di UPT Puskesmas Purwosari (Bojonegoro). 
-        Berikut adalah ringkasan data pasien secara real-time berdasarkan filter yang sedang aktif di aplikasi:
-        
-        {context_summary}
-        
-        Tugas Anda: Jawablah pertanyaan pengguna di bawah ini secara spesifik, berbasis pada data di atas, praktis, dan terstruktur. Jangan berhalusinasi, gunakan angka-angka di atas sebagai landasan argumen Anda.
-        
-        Pertanyaan Pengguna: {user_q}
-        """
-        
-        with st.spinner("🤖 AI sedang menganalisis data dan merumuskan jawaban..."):
+        with st.spinner("🤖 Agen AI sedang memproses kode dan menghitung data Anda..."):
             try:
-                model = genai.GenerativeModel('gemini-2.5-flash') 
-                response = model.generate_content(prompt)
+                # PandasAI akan menerjemahkan pertanyaan menjadi kode, mengeksekusi di DF, dan mereturn jawaban
+                response = sdf.chat(user_q)
                 
-                st.markdown("### 📊 Analisis AI:")
-                st.markdown(f"""
-                <div style="padding: 1.5rem; border-radius: 0.5rem; background-color: var(--secondary-background-color); border: 1px solid rgba(148, 163, 184, 0.4);">
-                    {response.text}
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown("### 📊 Hasil Analisis AI:")
+                
+                # PandasAI bisa mengembalikan teks, angka, dataframe, atau path gambar grafik
+                if isinstance(response, (pd.DataFrame, pd.Series)):
+                    st.dataframe(response)
+                elif isinstance(response, str) and response.endswith('.png'):
+                    # Jika AI membuat grafik (biasanya disimpan di folder 'exports/charts')
+                    if os.path.exists(response):
+                        st.image(response)
+                    else:
+                        st.write("AI mencoba membuat grafik, tetapi file tidak ditemukan.")
+                else:
+                    # Output teks atau angka biasa
+                    st.success(response)
 
             except Exception as e:
                 error_msg = str(e)
                 if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
-                    st.warning("⏳ **Sistem AI sedang sibuk (Limit Penggunaan).** Silakan tunggu sekitar 1 menit, lalu klik 'Kirim' lagi.")
+                    st.warning("⏳ **Sistem AI sedang sibuk (Limit Penggunaan).** Silakan tunggu sekitar 1 menit, lalu coba lagi.")
+                elif "No code found in the response" in error_msg:
+                    st.warning("🤔 AI kebingungan memahami maksud Anda atau data tidak mendukung. Coba susun ulang pertanyaan Anda menjadi lebih spesifik.")
                 else:
-                    st.error(f"❌ Gagal terhubung ke server AI. Detail: {error_msg}")
+                    st.error(f"❌ Gagal memproses data. Detail Error: {error_msg}")
 
 # ========= MAIN =========
 
 def main():
     df_filtered, filter_info = apply_filters(None)
     
-    is_genai_configured = get_gemini_client()
+    # Ambil API Key mentah untuk PandasAI
+    api_key = get_gemini_api_key()
+    
+    # Inisialisasi dan verifikasi API
+    is_genai_configured = check_gemini_config(api_key)
 
     st.sidebar.markdown("---")
     page = st.sidebar.radio("Navigasi", [
         "Ringkasan Umum", "Analisis Kunjungan", "Analisis Penyakit", 
         "Peta Persebaran",
         "Analisis Pembiayaan", "Data & Unduhan", "Kualitas Data", 
-        "Prediksi ML", "Asisten AI"
+        "Prediksi ML", "Agen AI Cerdas"
     ])
     
     if page == "Ringkasan Umum": page_overview(df_filtered, filter_info)
@@ -752,7 +747,7 @@ def main():
     elif page == "Data & Unduhan": page_data(df_filtered, filter_info)
     elif page == "Kualitas Data": page_quality(df_filtered)
     elif page == "Prediksi ML": page_ml(df_filtered, filter_info)
-    elif page == "Asisten AI": page_ai_assistant(df_filtered, filter_info, is_genai_configured)
+    elif page == "Agen AI Cerdas": page_ai_assistant(df_filtered, filter_info, is_genai_configured, api_key)
 
 if __name__ == "__main__":
     main()

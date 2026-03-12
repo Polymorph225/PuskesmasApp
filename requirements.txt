@@ -5,3 +5,5 @@ plotly
 prophet
 google-generativeai
 pandasai
+openpyxl
+xlrd

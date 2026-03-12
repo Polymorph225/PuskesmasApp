@@ -3,4 +3,4 @@ pandas
 numpy
 plotly
 prophet
-google-generativeai
+google-genai

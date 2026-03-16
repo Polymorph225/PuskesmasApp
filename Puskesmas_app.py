@@ -95,7 +95,7 @@ def get_gemini_client():
         api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 
     if not api_key:
-        st.warning("⚠️ API key Gemini belum diset. Fitur AI Asisten tidak akan berfungsi. Pastikan Anda telah mengatur GEMINI_API_KEY.")
+        st.warning("⚠️ API key Gemini belum diset. Fitur AI Agent tidak akan berfungsi. Pastikan Anda telah mengatur GEMINI_API_KEY.")
         return False
 
     try:
@@ -638,15 +638,15 @@ def page_quality(df):
     st.write("Missing Values:")
     st.dataframe(df.isna().sum().to_frame("Missing Count"))
 
-# ================== HALAMAN ASISTEN AI ==================
+# ================== HALAMAN Agent AI ==================
 def page_ai_assistant(df_filtered, filter_info, is_genai_configured):
-    st.subheader("🤖 Asisten AI Cerdas")
+    st.subheader("🤖 Agent AI Cerdas")
     
     if df_filtered is None or df_filtered.empty: 
         st.warning("⚠️ Data belum ada atau kosong. Silakan upload dan filter data terlebih dahulu di panel kiri.")
         return
     if not is_genai_configured: 
-        st.error("❌ API Key belum diset. Asisten AI tidak dapat digunakan.")
+        st.error("❌ API Key belum diset. Agent AI tidak dapat digunakan.")
         return
 
     # --- 1. AI MERANGKUM DATA STATISTIK SAAT INI ---
@@ -733,7 +733,7 @@ def main():
         "Ringkasan Umum", "Analisis Kunjungan", "Analisis Penyakit", 
         "Peta Persebaran",
         "Analisis Pembiayaan", "Data & Unduhan", "Kualitas Data", 
-        "Prediksi ML", "Asisten AI"
+        "Prediksi ML", "Agent AI"
     ])
     
     if page == "Ringkasan Umum": page_overview(df_filtered, filter_info)
@@ -744,7 +744,7 @@ def main():
     elif page == "Data & Unduhan": page_data(df_filtered, filter_info)
     elif page == "Kualitas Data": page_quality(df_filtered)
     elif page == "Prediksi ML": page_ml(df_filtered, filter_info)
-    elif page == "Asisten AI": page_ai_assistant(df_filtered, filter_info, is_genai_configured)
+    elif page == "Agent AI": page_ai_assistant(df_filtered, filter_info, is_genai_configured)
 
 if __name__ == "__main__":
     main()

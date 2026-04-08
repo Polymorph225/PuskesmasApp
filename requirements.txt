@@ -6,3 +6,4 @@ prophet
 google-generativeai
 openpyxl
 xlrd
+fpdf==1.7.2

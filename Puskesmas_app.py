@@ -5,6 +5,9 @@ import os
 import re
 import plotly.express as px
 import plotly.graph_objects as go
+from fpdf import FPDF
+from datetime import datetime
+import tempfile
 
 # Library Machine Learning & AI
 import google.generativeai as genai
@@ -721,6 +724,110 @@ def page_ai_assistant(df_filtered, filter_info, is_genai_configured):
                 else:
                     st.error(f"❌ Gagal terhubung ke server AI. Detail: {error_msg}")
 
+# ================== HALAMAN CETAK LAPORAN PDF ==================
+def page_cetak_laporan(df_filtered, filter_info):
+    st.subheader("🖨️ Cetak Laporan PDF")
+    show_active_filters(filter_info)
+
+    if df_filtered is None or len(df_filtered) == 0:
+        st.warning("⚠️ Data kosong. Silakan upload dan atur filter data terlebih dahulu.")
+        return
+
+    st.write("Silakan klik tombol di bawah untuk men-generate laporan ringkasan eksekutif dalam format PDF berdasarkan data yang sedang difilter saat ini.")
+
+    if st.button("📄 Buat Dokumen PDF"):
+        with st.spinner("Menyusun laporan PDF..."):
+            # --- 1. Kalkulasi Data ---
+            total_kunjungan = len(df_filtered)
+            
+            top_diagnosa = []
+            if "diagnosa" in df_filtered.columns:
+                top_diagnosa = df_filtered["diagnosa"].value_counts().head(5).items()
+                
+            top_poli = []
+            if "poli" in df_filtered.columns:
+                top_poli = df_filtered["poli"].value_counts().head(5).items()
+
+            # --- 2. Setup FPDF ---
+            pdf = FPDF()
+            pdf.add_page()
+            
+            # --- Header Kop Surat ---
+            pdf.set_font("Arial", 'B', 16)
+            pdf.cell(0, 8, "LAPORAN RINGKASAN KUNJUNGAN PASIEN", ln=True, align='C')
+            pdf.set_font("Arial", 'B', 14)
+            pdf.cell(0, 8, "UPT PUSKESMAS PURWOSARI - KAB. BOJONEGORO", ln=True, align='C')
+            pdf.set_font("Arial", '', 10)
+            tanggal_cetak = datetime.now().strftime("%d %B %Y %H:%M")
+            pdf.cell(0, 6, f"Waktu Cetak: {tanggal_cetak}", ln=True, align='C')
+            pdf.line(10, 35, 200, 35)
+            pdf.ln(10)
+
+            # --- Informasi Filter ---
+            pdf.set_font("Arial", 'B', 12)
+            pdf.cell(0, 8, "1. Parameter Filter Aktif", ln=True)
+            pdf.set_font("Arial", '', 11)
+            if filter_info and any(filter_info.values()):
+                for k, v in filter_info.items():
+                    if v:
+                        pdf.cell(0, 6, f"- {k.title()}: {', '.join(map(str, v))}", ln=True)
+            else:
+                pdf.cell(0, 6, "- Menampilkan Semua Data (Tidak ada filter spesifik)", ln=True)
+            pdf.ln(5)
+
+            # --- Ringkasan Umum ---
+            pdf.set_font("Arial", 'B', 12)
+            pdf.cell(0, 8, "2. Ringkasan Kunjungan", ln=True)
+            pdf.set_font("Arial", '', 11)
+            pdf.cell(0, 6, f"Total Kunjungan Pasien : {total_kunjungan} kunjungan", ln=True)
+            
+            if "no_rm" in df_filtered.columns:
+                pdf.cell(0, 6, f"Total Pasien Unik (RM) : {df_filtered['no_rm'].nunique()} pasien", ln=True)
+            pdf.ln(5)
+
+            # --- Top 5 Penyakit ---
+            if top_diagnosa:
+                pdf.set_font("Arial", 'B', 12)
+                pdf.cell(0, 8, "3. Top 5 Diagnosa Penyakit Terbanyak", ln=True)
+                pdf.set_font("Arial", '', 11)
+                for i, (penyakit, jumlah) in enumerate(top_diagnosa, 1):
+                    pdf.cell(0, 6, f"{i}. {penyakit} ({jumlah} kasus)", ln=True)
+                pdf.ln(5)
+
+            # --- Top 5 Poli ---
+            if top_poli:
+                pdf.set_font("Arial", 'B', 12)
+                pdf.cell(0, 8, "4. Distribusi Kunjungan per Poli / Unit", ln=True)
+                pdf.set_font("Arial", '', 11)
+                for i, (poli, jumlah) in enumerate(top_poli, 1):
+                    pdf.cell(0, 6, f"{i}. {poli} ({jumlah} kunjungan)", ln=True)
+                pdf.ln(5)
+
+            # --- Demografi ---
+            if "jenis_kelamin" in df_filtered.columns:
+                pdf.set_font("Arial", 'B', 12)
+                pdf.cell(0, 8, "5. Demografi Jenis Kelamin", ln=True)
+                pdf.set_font("Arial", '', 11)
+                jk_counts = df_filtered["jenis_kelamin"].value_counts()
+                for jk, jml in jk_counts.items():
+                    pdf.cell(0, 6, f"- {jk}: {jml} pasien", ln=True)
+
+            # --- 3. Simpan dan Download PDF ---
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                pdf.output(tmp_file.name)
+                with open(tmp_file.name, "rb") as f:
+                    pdf_bytes = f.read()
+
+            st.success("✅ Laporan PDF berhasil dibuat!")
+            
+            st.download_button(
+                label="📥 Download Laporan PDF",
+                data=pdf_bytes,
+                file_name=f"Laporan_Kunjungan_Puskesmas_{datetime.now().strftime('%Y%m%d')}.pdf",
+                mime="application/pdf",
+                type="primary"
+            )
+
 # ========= MAIN =========
 
 def main():
@@ -731,9 +838,8 @@ def main():
     st.sidebar.markdown("---")
     page = st.sidebar.radio("Navigasi", [
         "Ringkasan Umum", "Analisis Kunjungan", "Analisis Penyakit", 
-        "Peta Persebaran",
-        "Analisis Pembiayaan", "Data & Unduhan", "Kualitas Data", 
-        "Prediksi ML", "Agent AI"
+        "Peta Persebaran", "Analisis Pembiayaan", "Data & Unduhan", 
+        "Kualitas Data", "Prediksi ML", "Agent AI", "Cetak Laporan PDF"
     ])
     
     if page == "Ringkasan Umum": page_overview(df_filtered, filter_info)
@@ -745,6 +851,7 @@ def main():
     elif page == "Kualitas Data": page_quality(df_filtered)
     elif page == "Prediksi ML": page_ml(df_filtered, filter_info)
     elif page == "Agent AI": page_ai_assistant(df_filtered, filter_info, is_genai_configured)
+    elif page == "Cetak Laporan PDF": page_cetak_laporan(df_filtered, filter_info)
 
 if __name__ == "__main__":
     main()

@@ -675,11 +675,13 @@ def page_ml(df_filtered, filter_info):
         hoverinfo="skip"
     ))
 
+    # --- PERBAIKAN SYNTAX ERROR ---
     fig.update_layout(
         xaxis_title="Periode Waktu", yaxis_title="Jumlah Kunjungan/Pasien",
         hovermode="x unified", margin=dict(l=0, r=0, t=30, b=0),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
+
     st.plotly_chart(fig, use_container_width=True)
 
     # TAMBAHAN: Download Data Prediksi

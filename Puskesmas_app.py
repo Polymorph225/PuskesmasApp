@@ -726,107 +726,149 @@ def page_ai_assistant(df_filtered, filter_info, is_genai_configured):
 
 # ================== HALAMAN CETAK LAPORAN PDF ==================
 def page_cetak_laporan(df_filtered, filter_info):
-    st.subheader("🖨️ Cetak Laporan PDF")
+    st.subheader("🖨️ Cetak Laporan PDF (Lengkap dengan Grafik)")
     show_active_filters(filter_info)
 
     if df_filtered is None or len(df_filtered) == 0:
         st.warning("⚠️ Data kosong. Silakan upload dan atur filter data terlebih dahulu.")
         return
 
-    st.write("Silakan klik tombol di bawah untuk men-generate laporan ringkasan eksekutif dalam format PDF berdasarkan data yang sedang difilter saat ini.")
+    st.info("💡 **Catatan:** Proses pembuatan PDF dengan grafik akan memakan waktu beberapa detik karena sistem harus merender visualisasi data terlebih dahulu.")
 
     if st.button("📄 Buat Dokumen PDF"):
-        with st.spinner("Menyusun laporan PDF..."):
-            # --- 1. Kalkulasi Data ---
-            total_kunjungan = len(df_filtered)
-            
-            top_diagnosa = []
-            if "diagnosa" in df_filtered.columns:
-                top_diagnosa = df_filtered["diagnosa"].value_counts().head(5).items()
+        with st.spinner("Menyusun laporan dan merender grafik..."):
+            try:
+                # --- 1. Kalkulasi Data Teks ---
+                total_kunjungan = len(df_filtered)
                 
-            top_poli = []
-            if "poli" in df_filtered.columns:
-                top_poli = df_filtered["poli"].value_counts().head(5).items()
+                top_diagnosa = []
+                if "diagnosa" in df_filtered.columns:
+                    top_diagnosa = df_filtered["diagnosa"].value_counts().head(5).items()
+                    
+                top_poli = []
+                if "poli" in df_filtered.columns:
+                    top_poli = df_filtered["poli"].value_counts().head(5).items()
 
-            # --- 2. Setup FPDF ---
-            pdf = FPDF()
-            pdf.add_page()
-            
-            # --- Header Kop Surat ---
-            pdf.set_font("Arial", 'B', 16)
-            pdf.cell(0, 8, "LAPORAN RINGKASAN KUNJUNGAN PASIEN", ln=True, align='C')
-            pdf.set_font("Arial", 'B', 14)
-            pdf.cell(0, 8, "UPT PUSKESMAS PURWOSARI - KAB. BOJONEGORO", ln=True, align='C')
-            pdf.set_font("Arial", '', 10)
-            tanggal_cetak = datetime.now().strftime("%d %B %Y %H:%M")
-            pdf.cell(0, 6, f"Waktu Cetak: {tanggal_cetak}", ln=True, align='C')
-            pdf.line(10, 35, 200, 35)
-            pdf.ln(10)
+                # --- 2. Setup FPDF (Halaman Teks) ---
+                pdf = FPDF()
+                pdf.add_page()
+                
+                # Header Kop Surat
+                pdf.set_font("Arial", 'B', 16)
+                pdf.cell(0, 8, "LAPORAN RINGKASAN KUNJUNGAN PASIEN", ln=True, align='C')
+                pdf.set_font("Arial", 'B', 14)
+                pdf.cell(0, 8, "UPT PUSKESMAS PURWOSARI - KAB. BOJONEGORO", ln=True, align='C')
+                pdf.set_font("Arial", '', 10)
+                tanggal_cetak = datetime.now().strftime("%d %B %Y %H:%M")
+                pdf.cell(0, 6, f"Waktu Cetak: {tanggal_cetak}", ln=True, align='C')
+                pdf.line(10, 35, 200, 35)
+                pdf.ln(10)
 
-            # --- Informasi Filter ---
-            pdf.set_font("Arial", 'B', 12)
-            pdf.cell(0, 8, "1. Parameter Filter Aktif", ln=True)
-            pdf.set_font("Arial", '', 11)
-            if filter_info and any(filter_info.values()):
-                for k, v in filter_info.items():
-                    if v:
-                        pdf.cell(0, 6, f"- {k.title()}: {', '.join(map(str, v))}", ln=True)
-            else:
-                pdf.cell(0, 6, "- Menampilkan Semua Data (Tidak ada filter spesifik)", ln=True)
-            pdf.ln(5)
-
-            # --- Ringkasan Umum ---
-            pdf.set_font("Arial", 'B', 12)
-            pdf.cell(0, 8, "2. Ringkasan Kunjungan", ln=True)
-            pdf.set_font("Arial", '', 11)
-            pdf.cell(0, 6, f"Total Kunjungan Pasien : {total_kunjungan} kunjungan", ln=True)
-            
-            if "no_rm" in df_filtered.columns:
-                pdf.cell(0, 6, f"Total Pasien Unik (RM) : {df_filtered['no_rm'].nunique()} pasien", ln=True)
-            pdf.ln(5)
-
-            # --- Top 5 Penyakit ---
-            if top_diagnosa:
+                # Informasi Filter
                 pdf.set_font("Arial", 'B', 12)
-                pdf.cell(0, 8, "3. Top 5 Diagnosa Penyakit Terbanyak", ln=True)
+                pdf.cell(0, 8, "1. Parameter Filter Aktif", ln=True)
                 pdf.set_font("Arial", '', 11)
-                for i, (penyakit, jumlah) in enumerate(top_diagnosa, 1):
-                    pdf.cell(0, 6, f"{i}. {penyakit} ({jumlah} kasus)", ln=True)
+                if filter_info and any(filter_info.values()):
+                    for k, v in filter_info.items():
+                        if v:
+                            pdf.cell(0, 6, f"- {k.title()}: {', '.join(map(str, v))}", ln=True)
+                else:
+                    pdf.cell(0, 6, "- Menampilkan Semua Data (Tidak ada filter)", ln=True)
                 pdf.ln(5)
 
-            # --- Top 5 Poli ---
-            if top_poli:
+                # Ringkasan Kunjungan
                 pdf.set_font("Arial", 'B', 12)
-                pdf.cell(0, 8, "4. Distribusi Kunjungan per Poli / Unit", ln=True)
+                pdf.cell(0, 8, "2. Ringkasan Kunjungan", ln=True)
                 pdf.set_font("Arial", '', 11)
-                for i, (poli, jumlah) in enumerate(top_poli, 1):
-                    pdf.cell(0, 6, f"{i}. {poli} ({jumlah} kunjungan)", ln=True)
+                pdf.cell(0, 6, f"Total Kunjungan Pasien : {total_kunjungan} kunjungan", ln=True)
+                if "no_rm" in df_filtered.columns:
+                    pdf.cell(0, 6, f"Total Pasien Unik (RM) : {df_filtered['no_rm'].nunique()} pasien", ln=True)
                 pdf.ln(5)
 
-            # --- Demografi ---
-            if "jenis_kelamin" in df_filtered.columns:
-                pdf.set_font("Arial", 'B', 12)
-                pdf.cell(0, 8, "5. Demografi Jenis Kelamin", ln=True)
-                pdf.set_font("Arial", '', 11)
-                jk_counts = df_filtered["jenis_kelamin"].value_counts()
-                for jk, jml in jk_counts.items():
-                    pdf.cell(0, 6, f"- {jk}: {jml} pasien", ln=True)
+                # Top 5 Penyakit
+                if top_diagnosa:
+                    pdf.set_font("Arial", 'B', 12)
+                    pdf.cell(0, 8, "3. Top 5 Diagnosa Penyakit Terbanyak", ln=True)
+                    pdf.set_font("Arial", '', 11)
+                    for i, (penyakit, jumlah) in enumerate(top_diagnosa, 1):
+                        pdf.cell(0, 6, f"{i}. {penyakit} ({jumlah} kasus)", ln=True)
+                    pdf.ln(5)
 
-            # --- 3. Simpan dan Download PDF ---
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-                pdf.output(tmp_file.name)
-                with open(tmp_file.name, "rb") as f:
-                    pdf_bytes = f.read()
+                # Demografi Jenis Kelamin
+                if "jenis_kelamin" in df_filtered.columns:
+                    pdf.set_font("Arial", 'B', 12)
+                    pdf.cell(0, 8, "4. Demografi Jenis Kelamin", ln=True)
+                    pdf.set_font("Arial", '', 11)
+                    jk_counts = df_filtered["jenis_kelamin"].value_counts()
+                    for jk, jml in jk_counts.items():
+                        pdf.cell(0, 6, f"- {jk}: {jml} pasien", ln=True)
 
-            st.success("✅ Laporan PDF berhasil dibuat!")
-            
-            st.download_button(
-                label="📥 Download Laporan PDF",
-                data=pdf_bytes,
-                file_name=f"Laporan_Kunjungan_Puskesmas_{datetime.now().strftime('%Y%m%d')}.pdf",
-                mime="application/pdf",
-                type="primary"
-            )
+                # --- 3. PEMBUATAN HALAMAN GRAFIK (LAMPIRAN) ---
+                pdf.add_page()
+                pdf.set_font("Arial", 'B', 14)
+                pdf.cell(0, 10, "LAMPIRAN VISUALISASI DATA", ln=True, align='C')
+                pdf.line(10, 20, 200, 20)
+                pdf.ln(5)
+
+                temp_images = [] # Untuk menyimpan path gambar sementara agar bisa dihapus nanti
+
+                # Grafik 1: Distribusi Penyakit (Bar Chart)
+                if "diagnosa" in df_filtered.columns:
+                    top10_df = df_filtered["diagnosa"].value_counts().head(10).reset_index()
+                    top10_df.columns = ['Diagnosa', 'Jumlah']
+                    fig_diag = px.bar(top10_df, x='Diagnosa', y='Jumlah', title="Top 10 Diagnosa Penyakit", text_auto=True)
+                    
+                    # Simpan gambar sementara
+                    fd, path_diag = tempfile.mkstemp(suffix=".png")
+                    fig_diag.write_image(path_diag, engine="kaleido", width=800, height=500)
+                    temp_images.append(path_diag)
+
+                    pdf.set_font("Arial", 'B', 12)
+                    pdf.cell(0, 8, "A. Grafik Distribusi Penyakit", ln=True)
+                    pdf.image(path_diag, x=15, w=180)
+                    pdf.ln(5)
+
+                # Grafik 2: Tren Kunjungan Waktu (Line Chart)
+                if "tanggal_kunjungan" in df_filtered.columns:
+                    trend = df_filtered.groupby(["tahun", "bulan", "nama_bulan"]).size().reset_index(name="count").sort_values(["tahun", "bulan"])
+                    if not trend.empty:
+                        trend["Periode"] = trend["nama_bulan"].astype(str) + " " + trend["tahun"].astype(str)
+                        fig_trend = px.line(trend, x="Periode", y="count", title="Tren Kunjungan Pasien Berdasarkan Bulan", markers=True)
+                        
+                        # Simpan gambar sementara
+                        fd, path_trend = tempfile.mkstemp(suffix=".png")
+                        fig_trend.write_image(path_trend, engine="kaleido", width=800, height=400)
+                        temp_images.append(path_trend)
+
+                        pdf.set_font("Arial", 'B', 12)
+                        pdf.cell(0, 8, "B. Tren Kunjungan Bulanan", ln=True)
+                        pdf.image(path_trend, x=15, w=180)
+                        pdf.ln(5)
+
+                # --- 4. Simpan ke PDF dan Bersihkan File Temporary ---
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
+                    pdf.output(tmp_pdf.name)
+                    with open(tmp_pdf.name, "rb") as f:
+                        pdf_bytes = f.read()
+
+                # Hapus gambar grafik sementara dari memori server
+                for img_path in temp_images:
+                    if os.path.exists(img_path):
+                        os.remove(img_path)
+
+                st.success("✅ Laporan PDF beserta grafik berhasil dibuat!")
+                
+                # Tombol Download
+                st.download_button(
+                    label="📥 Download Laporan PDF (Teks & Grafik)",
+                    data=pdf_bytes,
+                    file_name=f"Laporan_Komprehensif_Puskesmas_{datetime.now().strftime('%Y%m%d')}.pdf",
+                    mime="application/pdf",
+                    type="primary"
+                )
+
+            except Exception as e:
+                st.error(f"❌ Terjadi kesalahan saat memproses grafik. Pastikan Anda sudah menambahkan 'kaleido' di requirements.txt. Detail error: {e}")
 
 # ========= MAIN =========
 

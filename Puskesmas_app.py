@@ -241,7 +241,7 @@ def apply_filters(_):
         # Filter Variables
         date_range = None
         tahun_pilihan = poli_pilihan = jk_pilihan = bayar_pilihan = kelompok_umur_pilihan = desa_pilihan = None
-        kecuali_penyakit_pilihan = None # Variabel Pengecualian Penyakit
+        kecuali_penyakit_pilihan = None 
         
         st.markdown("### 🔍 Filter Data")
         
@@ -332,8 +332,14 @@ def page_overview(df_filtered, filter_info):
 
     if "poli" in df_filtered.columns:
         st.markdown("### 🏥 Distribusi Poli")
+        # --- TAMBAHAN OPSI SORTING ---
+        sort_poli = st.radio("Urutkan Jumlah Kunjungan Poli:", ["Terbanyak ke Sedikit", "Sedikit ke Terbanyak"], horizontal=True, key="sort_poli")
+        is_asc_poli = True if sort_poli == "Sedikit ke Terbanyak" else False
+        
         df_poli = df_filtered["poli"].value_counts().reset_index()
         df_poli.columns = ["Poli", "Jumlah"]
+        df_poli = df_poli.sort_values(by="Jumlah", ascending=is_asc_poli)
+        
         st.bar_chart(df_poli.set_index("Poli"))
         # Tombol Download Excel
         st.download_button("📥 Download Distribusi Poli (Excel)", convert_df_to_excel(df_poli), "distribusi_poli.xlsx")
@@ -343,18 +349,27 @@ def page_kunjungan(df_filtered, filter_info):
     show_active_filters(filter_info)
     if df_filtered is None or len(df_filtered) == 0: return
     
+    # --- TAMBAHAN OPSI SORTING GLOBAL HALAMAN ---
+    sort_order = st.radio("Urutkan Grafik Berdasarkan:", ["Terbanyak ke Sedikit", "Sedikit ke Terbanyak"], horizontal=True, key="sort_kunjungan")
+    is_asc = True if sort_order == "Sedikit ke Terbanyak" else False
+    st.markdown("<br>", unsafe_allow_html=True) # Spasi jarak
+    
     col1, col2 = st.columns(2)
     if "jenis_kelamin" in df_filtered.columns:
         col1.markdown("#### Jenis Kelamin")
         df_jk = df_filtered["jenis_kelamin"].value_counts().reset_index()
         df_jk.columns = ["Jenis Kelamin", "Jumlah"]
+        df_jk = df_jk.sort_values(by="Jumlah", ascending=is_asc)
+        
         col1.bar_chart(df_jk.set_index("Jenis Kelamin"))
         col1.download_button("📥 Download Data Gender", convert_df_to_excel(df_jk), "kunjungan_gender.xlsx")
         
     if "kelompok_umur" in df_filtered.columns:
         col2.markdown("#### Kelompok Umur")
-        df_umur = df_filtered["kelompok_umur"].value_counts().sort_index().reset_index()
+        df_umur = df_filtered["kelompok_umur"].value_counts().reset_index()
         df_umur.columns = ["Kelompok Umur", "Jumlah"]
+        df_umur = df_umur.sort_values(by="Jumlah", ascending=is_asc)
+        
         col2.bar_chart(df_umur.set_index("Kelompok Umur"))
         col2.download_button("📥 Download Data Umur", convert_df_to_excel(df_umur), "kunjungan_umur.xlsx")
 
@@ -363,9 +378,19 @@ def page_penyakit(df_filtered, filter_info):
     show_active_filters(filter_info)
     if df_filtered is None or len(df_filtered) == 0: return
     if "diagnosa" in df_filtered.columns:
-        top_n = st.slider("Jumlah diagnosa", 5, 20, 10)
+        # --- TAMBAHAN KOLOM PENGATURAN & SORTING ---
+        col1, col2 = st.columns(2)
+        with col1:
+            top_n = st.slider("Jumlah diagnosa yang ditampilkan:", 5, 20, 10)
+        with col2:
+            sort_order = st.radio("Urutkan Kasus Penyakit:", ["Terbanyak", "Tersedikit"], horizontal=True, key="sort_penyakit")
+            
+        is_asc = True if sort_order == "Tersedikit" else False
+        
         df_diag = df_filtered["diagnosa"].value_counts().head(top_n).reset_index()
         df_diag.columns = ["Diagnosa", "Jumlah Kasus"]
+        df_diag = df_diag.sort_values(by="Jumlah Kasus", ascending=is_asc)
+        
         st.bar_chart(df_diag.set_index("Diagnosa"))
         st.download_button("📥 Download Data Top Penyakit (Excel)", convert_df_to_excel(df_diag), "top_penyakit.xlsx")
 
@@ -533,8 +558,14 @@ def page_pembiayaan(df_filtered, filter_info):
     st.subheader("💳 Analisis Pembiayaan")
     if df_filtered is None or "pembiayaan" not in df_filtered.columns: return
     
+    # --- TAMBAHAN OPSI SORTING ---
+    sort_order = st.radio("Urutkan Pasien Berdasarkan Pembiayaan:", ["Terbanyak ke Sedikit", "Sedikit ke Terbanyak"], horizontal=True, key="sort_bayar")
+    is_asc = True if sort_order == "Sedikit ke Terbanyak" else False
+    
     df_bayar = df_filtered["pembiayaan"].value_counts().reset_index()
     df_bayar.columns = ["Pembiayaan", "Jumlah"]
+    df_bayar = df_bayar.sort_values(by="Jumlah", ascending=is_asc)
+    
     st.bar_chart(df_bayar.set_index("Pembiayaan"))
     st.download_button("📥 Download Data Pembiayaan (Excel)", convert_df_to_excel(df_bayar), "pembiayaan.xlsx")
 
@@ -641,318 +672,4 @@ def page_ml(df_filtered, filter_info):
 
     fig.update_layout(
         xaxis_title="Periode Waktu", yaxis_title="Jumlah Kunjungan/Pasien",
-        hovermode="x unified", margin=dict(l=0, r=0, t=30, b=0),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-    # TAMBAHAN: Download Data Prediksi
-    df_download_pred = forecast_future[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].copy()
-    df_download_pred.columns = ['Tanggal', 'Prediksi_Jumlah', 'Batas_Bawah', 'Batas_Atas']
-    st.download_button(
-        label="📥 Download Data Prediksi (Excel)",
-        data=convert_df_to_excel(df_download_pred),
-        file_name=f"prediksi_{kolom_fokus}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-
-    # ================= KESIMPULAN ESTIMASI DENGAN CUSTOM HTML/CSS =================
-    st.markdown(f"### 📢 Kesimpulan Estimasi Hingga {pd.to_datetime(target_date).strftime('%d %B %Y')}")
-    if not forecast_future.empty:
-        total_estimasi = int(round(forecast_future["yhat"].clip(lower=0).sum()))
-        
-        target_week = forecast_future.iloc[-1]
-        tgl_target_akhir = target_week["ds"].strftime("%d %B %Y")
-        
-        est_kunjungan_akhir = max(0, int(round(target_week["yhat"])))
-        batas_bawah_akhir = max(0, int(round(target_week["yhat_lower"])))
-        batas_atas_akhir = max(0, int(round(target_week["yhat_upper"])))
-
-        col_alert, col_metric1, col_metric2 = st.columns([2, 1, 1])
-        with col_alert:
-            st.markdown(f"""
-                <div style="padding: 1rem; border-radius: 0.5rem; background-color: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); margin-bottom: 1rem;">
-                    <div class="highlight-estimasi">
-                        📆 Selama periode ke depan hingga <b>{tgl_target_akhir}</b>, AI memperkirakan akan ada <b>total akumulasi {total_estimasi} kunjungan/kasus</b> untuk <b>{pilihan_item}</b>. <br><br>
-                        Sementara itu, khusus pada pekan terakhir tersebut, diprediksi terdapat <b>{est_kunjungan_akhir} kunjungan</b> baru.
-                    </div>
-                </div>
-            """, unsafe_allow_html=True)
-            
-        with col_metric1:
-            st.metric("Total Akumulasi Pasien", f"{total_estimasi} Pasien")
-        with col_metric2:
-            st.metric("Estimasi Pekan Terakhir", f"{est_kunjungan_akhir} Pasien", help=f"Batas Bawah: {batas_bawah_akhir} | Batas Atas: {batas_atas_akhir}")
-    else:
-        st.info("Tanggal prediksi terlalu dekat dengan data terakhir.")
-
-def page_data(df_filtered, filter_info):
-    st.subheader("📄 Data & Unduhan")
-    if df_filtered is None: return
-    st.dataframe(df_filtered)
-    st.download_button("💾 Download CSV", df_filtered.to_csv(index=False).encode("utf-8"), "data_puskesmas.csv", "text/csv")
-
-def page_quality(df):
-    st.subheader("🧹 Kualitas Data")
-    if df is None: return
-    st.write(f"Duplikasi: {df.duplicated().sum()} baris")
-    st.write("Missing Values:")
-    st.dataframe(df.isna().sum().to_frame("Missing Count"))
-
-# ================== HALAMAN Agent AI ==================
-def page_ai_assistant(df_filtered, filter_info, is_genai_configured):
-    st.subheader("🤖 Agent AI Cerdas")
-    
-    if df_filtered is None or df_filtered.empty: 
-        st.warning("⚠️ Data belum ada atau kosong. Silakan upload dan filter data terlebih dahulu di panel kiri.")
-        return
-    if not is_genai_configured: 
-        st.error("❌ API Key belum diset. Agent AI tidak dapat digunakan.")
-        return
-
-    # --- 1. AI MERANGKUM DATA STATISTIK SAAT INI ---
-    total_data = len(df_filtered)
-    
-    top_diagnosa = "-"
-    if "diagnosa" in df_filtered.columns:
-        top_diagnosa_series = df_filtered["diagnosa"].value_counts().head(5)
-        top_diagnosa = ", ".join([f"{k} ({v} kasus)" for k, v in top_diagnosa_series.items()])
-        
-    top_poli = "-"
-    if "poli" in df_filtered.columns:
-        top_poli_series = df_filtered["poli"].value_counts().head(3)
-        top_poli = ", ".join([f"{k} ({v} kunjungan)" for k, v in top_poli_series.items()])
-        
-    gender = df_filtered['jenis_kelamin'].mode()[0] if 'jenis_kelamin' in df_filtered.columns and not df_filtered['jenis_kelamin'].dropna().empty else "-"
-    umur = df_filtered['kelompok_umur'].mode()[0] if 'kelompok_umur' in df_filtered.columns and not df_filtered['kelompok_umur'].dropna().empty else "-"
-    
-    desa = "-"
-    if "desa" in df_filtered.columns:
-        desa_series = df_filtered["desa"].value_counts().head(3)
-        desa = ", ".join([f"{k} ({v} pasien)" for k, v in desa_series.items()])
-
-    # Menyusun rangkuman data untuk dikirim ke otak AI secara tersembunyi
-    context_summary = f"""[STATISTIK DATA PASIEN SAAT INI]
-- Total Pasien/Kunjungan: {total_data}
-- 5 Penyakit Terbanyak: {top_diagnosa}
-- 3 Poli Terpadat: {top_poli}
-- Demografi Mayoritas: Jenis Kelamin {gender}, Kelompok Usia {umur}
-- 3 Desa Asal Pasien Terbanyak: {desa}"""
-
-    # --- 2. FITUR TRANSPARANSI ---
-    with st.expander("👁️ Lihat Konteks Data yang Akan Dikirim ke AI", expanded=False):
-        st.markdown("Di balik layar, aplikasi akan menyisipkan ringkasan teks ini kepada AI agar jawaban yang diberikan akurat dan sesuai dengan kondisi Puskesmas berdasarkan filter Anda saat ini:")
-        st.code(context_summary, language="markdown")
-
-    st.info('💡 **Tips:** Coba tanyakan: *"Berdasarkan data penyakit terbanyak saat ini, program promkes desa apa yang paling mendesak?"* atau *"Apa obat yang perlu saya siapkan lebih banyak bulan ini?"*')
-
-    user_q = st.text_area("Tanyakan strategi/analisis kesehatan:", placeholder="Ketik pertanyaan Anda di sini...")
-    
-    if st.button("Kirim Pertanyaan"):
-        if not user_q.strip():
-            st.warning("Pertanyaan tidak boleh kosong.")
-            return
-
-        prompt = f"""Anda adalah Analis Data dan Ahli Kesehatan Masyarakat profesional di UPT Puskesmas Purwosari (Bojonegoro). 
-        Berikut adalah ringkasan data pasien secara real-time berdasarkan filter yang sedang aktif di aplikasi:
-        
-        {context_summary}
-        
-        Tugas Anda: Jawablah pertanyaan pengguna di bawah ini secara spesifik, berbasis pada data di atas, praktis, dan terstruktur. Jangan berhalusinasi, gunakan angka-angka di atas sebagai landasan argumen Anda.
-        
-        Pertanyaan Pengguna: {user_q}
-        """
-        
-        with st.spinner("🤖 AI sedang menganalisis data dan merumuskan jawaban..."):
-            try:
-                model = genai.GenerativeModel('gemini-2.5-flash') 
-                response = model.generate_content(prompt)
-                
-                st.markdown("### 📊 Analisis AI:")
-                st.markdown(f"""
-                <div style="padding: 1.5rem; border-radius: 0.5rem; background-color: var(--secondary-background-color); border: 1px solid rgba(148, 163, 184, 0.4);">
-                    {response.text}
-                </div>
-                """, unsafe_allow_html=True)
-
-            except Exception as e:
-                error_msg = str(e)
-                if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
-                    st.warning("⏳ **Sistem AI sedang sibuk (Limit Penggunaan).** Silakan tunggu sekitar 1 menit, lalu klik 'Kirim' lagi.")
-                else:
-                    st.error(f"❌ Gagal terhubung ke server AI. Detail: {error_msg}")
-
-# ================== HALAMAN CETAK LAPORAN PDF ==================
-def page_cetak_laporan(df_filtered, filter_info):
-    st.subheader("🖨️ Cetak Laporan PDF (Lengkap dengan Grafik)")
-    show_active_filters(filter_info)
-
-    if df_filtered is None or len(df_filtered) == 0:
-        st.warning("⚠️ Data kosong. Silakan upload dan atur filter data terlebih dahulu.")
-        return
-
-    st.info("💡 **Catatan:** Proses pembuatan PDF dengan grafik akan memakan waktu beberapa detik karena sistem harus merender visualisasi data terlebih dahulu.")
-
-    if st.button("📄 Buat Dokumen PDF"):
-        with st.spinner("Menyusun laporan dan merender grafik..."):
-            try:
-                # --- 1. Kalkulasi Data Teks ---
-                total_kunjungan = len(df_filtered)
-                
-                top_diagnosa = []
-                if "diagnosa" in df_filtered.columns:
-                    top_diagnosa = df_filtered["diagnosa"].value_counts().head(5).items()
-                    
-                top_poli = []
-                if "poli" in df_filtered.columns:
-                    top_poli = df_filtered["poli"].value_counts().head(5).items()
-
-                # --- 2. Setup FPDF (Halaman Teks) ---
-                pdf = FPDF()
-                pdf.add_page()
-                
-                # Header Kop Surat
-                pdf.set_font("Arial", 'B', 16)
-                pdf.cell(0, 8, "LAPORAN RINGKASAN KUNJUNGAN PASIEN", ln=True, align='C')
-                pdf.set_font("Arial", 'B', 14)
-                pdf.cell(0, 8, "UPT PUSKESMAS PURWOSARI - KAB. BOJONEGORO", ln=True, align='C')
-                pdf.set_font("Arial", '', 10)
-                tanggal_cetak = datetime.now().strftime("%d %B %Y %H:%M")
-                pdf.cell(0, 6, f"Waktu Cetak: {tanggal_cetak}", ln=True, align='C')
-                pdf.line(10, 35, 200, 35)
-                pdf.ln(10)
-
-                # Informasi Filter
-                pdf.set_font("Arial", 'B', 12)
-                pdf.cell(0, 8, "1. Parameter Filter Aktif", ln=True)
-                pdf.set_font("Arial", '', 11)
-                if filter_info and any(filter_info.values()):
-                    for k, v in filter_info.items():
-                        if v:
-                            label_bersih = k.replace("_", " ").title()
-                            pdf.cell(0, 6, f"- {label_bersih}: {', '.join(map(str, v))}", ln=True)
-                else:
-                    pdf.cell(0, 6, "- Menampilkan Semua Data (Tidak ada filter)", ln=True)
-                pdf.ln(5)
-
-                # Ringkasan Kunjungan
-                pdf.set_font("Arial", 'B', 12)
-                pdf.cell(0, 8, "2. Ringkasan Kunjungan", ln=True)
-                pdf.set_font("Arial", '', 11)
-                pdf.cell(0, 6, f"Total Kunjungan Pasien : {total_kunjungan} kunjungan", ln=True)
-                if "no_rm" in df_filtered.columns:
-                    pdf.cell(0, 6, f"Total Pasien Unik (RM) : {df_filtered['no_rm'].nunique()} pasien", ln=True)
-                pdf.ln(5)
-
-                # Top 5 Penyakit
-                if top_diagnosa:
-                    pdf.set_font("Arial", 'B', 12)
-                    pdf.cell(0, 8, "3. Top 5 Diagnosa Penyakit Terbanyak", ln=True)
-                    pdf.set_font("Arial", '', 11)
-                    for i, (penyakit, jumlah) in enumerate(top_diagnosa, 1):
-                        pdf.cell(0, 6, f"{i}. {penyakit} ({jumlah} kasus)", ln=True)
-                    pdf.ln(5)
-
-                # Demografi Jenis Kelamin
-                if "jenis_kelamin" in df_filtered.columns:
-                    pdf.set_font("Arial", 'B', 12)
-                    pdf.cell(0, 8, "4. Demografi Jenis Kelamin", ln=True)
-                    pdf.set_font("Arial", '', 11)
-                    jk_counts = df_filtered["jenis_kelamin"].value_counts()
-                    for jk, jml in jk_counts.items():
-                        pdf.cell(0, 6, f"- {jk}: {jml} pasien", ln=True)
-
-                # --- 3. PEMBUATAN HALAMAN GRAFIK (LAMPIRAN) ---
-                pdf.add_page()
-                pdf.set_font("Arial", 'B', 14)
-                pdf.cell(0, 10, "LAMPIRAN VISUALISASI DATA", ln=True, align='C')
-                pdf.line(10, 20, 200, 20)
-                pdf.ln(5)
-
-                temp_images = [] # Untuk menyimpan path gambar sementara agar bisa dihapus nanti
-
-                # Grafik 1: Distribusi Penyakit (Bar Chart)
-                if "diagnosa" in df_filtered.columns:
-                    top10_df = df_filtered["diagnosa"].value_counts().head(10).reset_index()
-                    top10_df.columns = ['Diagnosa', 'Jumlah']
-                    fig_diag = px.bar(top10_df, x='Diagnosa', y='Jumlah', title="Top 10 Diagnosa Penyakit", text_auto=True)
-                    
-                    # Simpan gambar sementara
-                    fd, path_diag = tempfile.mkstemp(suffix=".png")
-                    fig_diag.write_image(path_diag, engine="kaleido", width=800, height=500)
-                    temp_images.append(path_diag)
-
-                    pdf.set_font("Arial", 'B', 12)
-                    pdf.cell(0, 8, "A. Grafik Distribusi Penyakit", ln=True)
-                    pdf.image(path_diag, x=15, w=180)
-                    pdf.ln(5)
-
-                # Grafik 2: Tren Kunjungan Waktu (Line Chart)
-                if "tanggal_kunjungan" in df_filtered.columns:
-                    trend = df_filtered.groupby(["tahun", "bulan", "nama_bulan"]).size().reset_index(name="count").sort_values(["tahun", "bulan"])
-                    if not trend.empty:
-                        trend["Periode"] = trend["nama_bulan"].astype(str) + " " + trend["tahun"].astype(str)
-                        fig_trend = px.line(trend, x="Periode", y="count", title="Tren Kunjungan Pasien Berdasarkan Bulan", markers=True)
-                        
-                        # Simpan gambar sementara
-                        fd, path_trend = tempfile.mkstemp(suffix=".png")
-                        fig_trend.write_image(path_trend, engine="kaleido", width=800, height=400)
-                        temp_images.append(path_trend)
-
-                        pdf.set_font("Arial", 'B', 12)
-                        pdf.cell(0, 8, "B. Tren Kunjungan Bulanan", ln=True)
-                        pdf.image(path_trend, x=15, w=180)
-                        pdf.ln(5)
-
-                # --- 4. Simpan ke PDF dan Bersihkan File Temporary ---
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
-                    pdf.output(tmp_pdf.name)
-                    with open(tmp_pdf.name, "rb") as f:
-                        pdf_bytes = f.read()
-
-                # Hapus gambar grafik sementara dari memori server
-                for img_path in temp_images:
-                    if os.path.exists(img_path):
-                        os.remove(img_path)
-
-                st.success("✅ Laporan PDF beserta grafik berhasil dibuat!")
-                
-                # Tombol Download
-                st.download_button(
-                    label="📥 Download Laporan PDF (Teks & Grafik)",
-                    data=pdf_bytes,
-                    file_name=f"Laporan_Komprehensif_Puskesmas_{datetime.now().strftime('%Y%m%d')}.pdf",
-                    mime="application/pdf",
-                    type="primary"
-                )
-
-            except Exception as e:
-                st.error(f"❌ Terjadi kesalahan saat memproses grafik. Pastikan Anda sudah menambahkan 'kaleido' di requirements.txt. Detail error: {e}")
-
-# ========= MAIN =========
-
-def main():
-    df_filtered, filter_info = apply_filters(None)
-    
-    is_genai_configured = get_gemini_client()
-
-    st.sidebar.markdown("---")
-    page = st.sidebar.radio("Navigasi", [
-        "Ringkasan Umum", "Analisis Kunjungan", "Analisis Penyakit", 
-        "Peta Persebaran", "Analisis Pembiayaan", "Data & Unduhan", 
-        "Kualitas Data", "Prediksi ML", "Agent AI", "Cetak Laporan PDF"
-    ])
-    
-    if page == "Ringkasan Umum": page_overview(df_filtered, filter_info)
-    elif page == "Analisis Kunjungan": page_kunjungan(df_filtered, filter_info)
-    elif page == "Analisis Penyakit": page_penyakit(df_filtered, filter_info)
-    elif page == "Peta Persebaran": page_peta_persebaran(df_filtered, filter_info)
-    elif page == "Analisis Pembiayaan": page_pembiayaan(df_filtered, filter_info)
-    elif page == "Data & Unduhan": page_data(df_filtered, filter_info)
-    elif page == "Kualitas Data": page_quality(df_filtered)
-    elif page == "Prediksi ML": page_ml(df_filtered, filter_info)
-    elif page == "Agent AI": page_ai_assistant(df_filtered, filter_info, is_genai_configured)
-    elif page == "Cetak Laporan PDF": page_cetak_laporan(df_filtered, filter_info)
-
-if __name__ == "__main__":
-    main()
+        hovermode="x unified", margin=dict(l=0, r=0,

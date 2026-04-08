@@ -332,71 +332,42 @@ def page_overview(df_filtered, filter_info):
 
     if "poli" in df_filtered.columns:
         st.markdown("### 🏥 Distribusi Poli")
-        # --- TAMBAHAN OPSI SORTING ---
-        sort_poli = st.radio("Urutkan Jumlah Kunjungan Poli:", ["Terbanyak ke Sedikit", "Sedikit ke Terbanyak"], horizontal=True, key="sort_poli")
-        is_asc_poli = True if sort_poli == "Sedikit ke Terbanyak" else False
-        
         df_poli = df_filtered["poli"].value_counts().reset_index()
         df_poli.columns = ["Poli", "Jumlah"]
-        df_poli = df_poli.sort_values(by="Jumlah", ascending=is_asc_poli)
-        
         st.bar_chart(df_poli.set_index("Poli"))
         # Tombol Download Excel
         st.download_button("📥 Download Distribusi Poli (Excel)", convert_df_to_excel(df_poli), "distribusi_poli.xlsx")
-
 
 def page_kunjungan(df_filtered, filter_info):
     st.subheader("👥 Analisis Kunjungan")
     show_active_filters(filter_info)
     if df_filtered is None or len(df_filtered) == 0: return
     
-    # --- TAMBAHAN OPSI SORTING GLOBAL HALAMAN ---
-    sort_order = st.radio("Urutkan Grafik Berdasarkan:", ["Terbanyak ke Sedikit", "Sedikit ke Terbanyak"], horizontal=True, key="sort_kunjungan")
-    is_asc = True if sort_order == "Sedikit ke Terbanyak" else False
-    st.markdown("<br>", unsafe_allow_html=True) # Spasi jarak
-    
     col1, col2 = st.columns(2)
     if "jenis_kelamin" in df_filtered.columns:
         col1.markdown("#### Jenis Kelamin")
         df_jk = df_filtered["jenis_kelamin"].value_counts().reset_index()
         df_jk.columns = ["Jenis Kelamin", "Jumlah"]
-        df_jk = df_jk.sort_values(by="Jumlah", ascending=is_asc)
-        
         col1.bar_chart(df_jk.set_index("Jenis Kelamin"))
         col1.download_button("📥 Download Data Gender", convert_df_to_excel(df_jk), "kunjungan_gender.xlsx")
         
     if "kelompok_umur" in df_filtered.columns:
         col2.markdown("#### Kelompok Umur")
-        df_umur = df_filtered["kelompok_umur"].value_counts().reset_index()
+        df_umur = df_filtered["kelompok_umur"].value_counts().sort_index().reset_index()
         df_umur.columns = ["Kelompok Umur", "Jumlah"]
-        df_umur = df_umur.sort_values(by="Jumlah", ascending=is_asc)
-        
         col2.bar_chart(df_umur.set_index("Kelompok Umur"))
         col2.download_button("📥 Download Data Umur", convert_df_to_excel(df_umur), "kunjungan_umur.xlsx")
-
 
 def page_penyakit(df_filtered, filter_info):
     st.subheader("🦠 Analisis Penyakit")
     show_active_filters(filter_info)
     if df_filtered is None or len(df_filtered) == 0: return
-    
     if "diagnosa" in df_filtered.columns:
-        # --- TAMBAHAN KOLOM PENGATURAN & SORTING ---
-        col1, col2 = st.columns(2)
-        with col1:
-            top_n = st.slider("Jumlah diagnosa yang ditampilkan:", 5, 20, 10)
-        with col2:
-            sort_order = st.radio("Urutkan Kasus Penyakit:", ["Terbanyak", "Tersedikit"], horizontal=True, key="sort_penyakit")
-            
-        is_asc = True if sort_order == "Tersedikit" else False
-        
+        top_n = st.slider("Jumlah diagnosa", 5, 20, 10)
         df_diag = df_filtered["diagnosa"].value_counts().head(top_n).reset_index()
         df_diag.columns = ["Diagnosa", "Jumlah Kasus"]
-        df_diag = df_diag.sort_values(by="Jumlah Kasus", ascending=is_asc)
-        
         st.bar_chart(df_diag.set_index("Diagnosa"))
         st.download_button("📥 Download Data Top Penyakit (Excel)", convert_df_to_excel(df_diag), "top_penyakit.xlsx")
-
 
 # ================== HALAMAN PETA ==================
 def page_peta_persebaran(df_filtered, filter_info):
@@ -558,19 +529,12 @@ def page_peta_persebaran(df_filtered, filter_info):
         st.bar_chart(top_desa_df.set_index("desa")["jumlah_kasus"])
         st.download_button("📥 Download Data Top Desa (Excel)", convert_df_to_excel(top_desa_df), "top_desa_terdampak.xlsx")
 
-
 def page_pembiayaan(df_filtered, filter_info):
     st.subheader("💳 Analisis Pembiayaan")
     if df_filtered is None or "pembiayaan" not in df_filtered.columns: return
     
-    # --- TAMBAHAN OPSI SORTING ---
-    sort_order = st.radio("Urutkan Pasien Berdasarkan Pembiayaan:", ["Terbanyak ke Sedikit", "Sedikit ke Terbanyak"], horizontal=True, key="sort_bayar")
-    is_asc = True if sort_order == "Sedikit ke Terbanyak" else False
-    
     df_bayar = df_filtered["pembiayaan"].value_counts().reset_index()
     df_bayar.columns = ["Pembiayaan", "Jumlah"]
-    df_bayar = df_bayar.sort_values(by="Jumlah", ascending=is_asc)
-    
     st.bar_chart(df_bayar.set_index("Pembiayaan"))
     st.download_button("📥 Download Data Pembiayaan (Excel)", convert_df_to_excel(df_bayar), "pembiayaan.xlsx")
 
@@ -675,13 +639,11 @@ def page_ml(df_filtered, filter_info):
         hoverinfo="skip"
     ))
 
-    # --- PERBAIKAN SYNTAX ERROR ---
     fig.update_layout(
         xaxis_title="Periode Waktu", yaxis_title="Jumlah Kunjungan/Pasien",
         hovermode="x unified", margin=dict(l=0, r=0, t=30, b=0),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
-
     st.plotly_chart(fig, use_container_width=True)
 
     # TAMBAHAN: Download Data Prediksi

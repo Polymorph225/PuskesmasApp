@@ -7,3 +7,4 @@ google-generativeai
 openpyxl
 xlrd
 fpdf==1.7.2
+kaleido==0.2.1

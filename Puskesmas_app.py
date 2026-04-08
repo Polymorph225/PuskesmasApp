@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import os
 import re
+import io
 import plotly.express as px
 import plotly.graph_objects as go
 from fpdf import FPDF
@@ -107,6 +108,15 @@ def get_gemini_client():
     except Exception as e:
         st.error(f"Gagal inisialisasi Gemini API: {e}")
         return False
+
+# ================== EKSPOR EXCEL HELPER ==================
+def convert_df_to_excel(df):
+    output = io.BytesIO()
+    # Menggunakan engine openpyxl
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Data')
+    processed_data = output.getvalue()
+    return processed_data
 
 # ================== DATA CLEANING HELPER ==================
 
@@ -300,10 +310,16 @@ def page_overview(df_filtered, filter_info):
         trend = df_filtered.groupby(["tahun", "bulan", "nama_bulan"]).size().reset_index(name="count").sort_values(["tahun", "bulan"])
         trend["label"] = trend["nama_bulan"].astype(str) + "-" + trend["tahun"].astype(str)
         st.line_chart(trend.set_index("label")["count"])
+        # Tombol Download Excel
+        st.download_button("📥 Download Tren Kunjungan (Excel)", convert_df_to_excel(trend), "tren_kunjungan.xlsx")
 
     if "poli" in df_filtered.columns:
         st.markdown("### 🏥 Distribusi Poli")
-        st.bar_chart(df_filtered["poli"].value_counts())
+        df_poli = df_filtered["poli"].value_counts().reset_index()
+        df_poli.columns = ["Poli", "Jumlah"]
+        st.bar_chart(df_poli.set_index("Poli"))
+        # Tombol Download Excel
+        st.download_button("📥 Download Distribusi Poli (Excel)", convert_df_to_excel(df_poli), "distribusi_poli.xlsx")
 
 def page_kunjungan(df_filtered, filter_info):
     st.subheader("👥 Analisis Kunjungan")
@@ -313,10 +329,17 @@ def page_kunjungan(df_filtered, filter_info):
     col1, col2 = st.columns(2)
     if "jenis_kelamin" in df_filtered.columns:
         col1.markdown("#### Jenis Kelamin")
-        col1.bar_chart(df_filtered["jenis_kelamin"].value_counts())
+        df_jk = df_filtered["jenis_kelamin"].value_counts().reset_index()
+        df_jk.columns = ["Jenis Kelamin", "Jumlah"]
+        col1.bar_chart(df_jk.set_index("Jenis Kelamin"))
+        col1.download_button("📥 Download Data Gender", convert_df_to_excel(df_jk), "kunjungan_gender.xlsx")
+        
     if "kelompok_umur" in df_filtered.columns:
         col2.markdown("#### Kelompok Umur")
-        col2.bar_chart(df_filtered["kelompok_umur"].value_counts().sort_index())
+        df_umur = df_filtered["kelompok_umur"].value_counts().sort_index().reset_index()
+        df_umur.columns = ["Kelompok Umur", "Jumlah"]
+        col2.bar_chart(df_umur.set_index("Kelompok Umur"))
+        col2.download_button("📥 Download Data Umur", convert_df_to_excel(df_umur), "kunjungan_umur.xlsx")
 
 def page_penyakit(df_filtered, filter_info):
     st.subheader("🦠 Analisis Penyakit")
@@ -324,7 +347,10 @@ def page_penyakit(df_filtered, filter_info):
     if df_filtered is None or len(df_filtered) == 0: return
     if "diagnosa" in df_filtered.columns:
         top_n = st.slider("Jumlah diagnosa", 5, 20, 10)
-        st.bar_chart(df_filtered["diagnosa"].value_counts().head(top_n))
+        df_diag = df_filtered["diagnosa"].value_counts().head(top_n).reset_index()
+        df_diag.columns = ["Diagnosa", "Jumlah Kasus"]
+        st.bar_chart(df_diag.set_index("Diagnosa"))
+        st.download_button("📥 Download Data Top Penyakit (Excel)", convert_df_to_excel(df_diag), "top_penyakit.xlsx")
 
 # ================== HALAMAN PETA ==================
 def page_peta_persebaran(df_filtered, filter_info):
@@ -484,11 +510,16 @@ def page_peta_persebaran(df_filtered, filter_info):
         st.markdown("#### 📊 Top Desa Terdampak")
         top_desa_df = df_grouped.groupby("desa")["jumlah_kasus"].sum().reset_index().sort_values("jumlah_kasus", ascending=False).head(10)
         st.bar_chart(top_desa_df.set_index("desa")["jumlah_kasus"])
+        st.download_button("📥 Download Data Top Desa (Excel)", convert_df_to_excel(top_desa_df), "top_desa_terdampak.xlsx")
 
 def page_pembiayaan(df_filtered, filter_info):
     st.subheader("💳 Analisis Pembiayaan")
     if df_filtered is None or "pembiayaan" not in df_filtered.columns: return
-    st.bar_chart(df_filtered["pembiayaan"].value_counts())
+    
+    df_bayar = df_filtered["pembiayaan"].value_counts().reset_index()
+    df_bayar.columns = ["Pembiayaan", "Jumlah"]
+    st.bar_chart(df_bayar.set_index("Pembiayaan"))
+    st.download_button("📥 Download Data Pembiayaan (Excel)", convert_df_to_excel(df_bayar), "pembiayaan.xlsx")
 
 # ================== HALAMAN ML (PROPHET) ==================
 def page_ml(df_filtered, filter_info):
@@ -597,6 +628,16 @@ def page_ml(df_filtered, filter_info):
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
     st.plotly_chart(fig, use_container_width=True)
+
+    # TAMBAHAN: Download Data Prediksi
+    df_download_pred = forecast_future[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].copy()
+    df_download_pred.columns = ['Tanggal', 'Prediksi_Jumlah', 'Batas_Bawah', 'Batas_Atas']
+    st.download_button(
+        label="📥 Download Data Prediksi (Excel)",
+        data=convert_df_to_excel(df_download_pred),
+        file_name=f"prediksi_{kolom_fokus}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
     # ================= KESIMPULAN ESTIMASI DENGAN CUSTOM HTML/CSS =================
     st.markdown(f"### 📢 Kesimpulan Estimasi Hingga {pd.to_datetime(target_date).strftime('%d %B %Y')}")

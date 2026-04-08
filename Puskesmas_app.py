@@ -241,6 +241,7 @@ def apply_filters(_):
         # Filter Variables
         date_range = None
         tahun_pilihan = poli_pilihan = jk_pilihan = bayar_pilihan = kelompok_umur_pilihan = desa_pilihan = None
+        kecuali_penyakit_pilihan = None # Variabel Pengecualian Penyakit
         
         st.markdown("### 🔍 Filter Data")
         
@@ -263,6 +264,14 @@ def apply_filters(_):
                 desa_pilihan = st.multiselect("Desa", options=sorted(df["desa"].dropna().unique()))
             if "pembiayaan" in df.columns:
                 bayar_pilihan = st.multiselect("Pembiayaan", options=sorted(df["pembiayaan"].dropna().unique()))
+            
+            # Pilihan Pengecualian Penyakit
+            if "diagnosa" in df.columns:
+                kecuali_penyakit_pilihan = st.multiselect(
+                    "❌ Kecualikan Penyakit", 
+                    options=sorted(df["diagnosa"].dropna().unique()),
+                    help="Penyakit yang dipilih di sini TIDAK AKAN diikutkan dalam analisis."
+                )
 
     # Apply Logic
     df_filtered = df.copy()
@@ -276,9 +285,14 @@ def apply_filters(_):
     if kelompok_umur_pilihan: df_filtered = df_filtered[df_filtered["kelompok_umur"].isin(kelompok_umur_pilihan)]
     if desa_pilihan: df_filtered = df_filtered[df_filtered["desa"].isin(desa_pilihan)]
     
+    # Membuang data penyakit yang dikecualikan
+    if kecuali_penyakit_pilihan:
+        df_filtered = df_filtered[~df_filtered["diagnosa"].isin(kecuali_penyakit_pilihan)]
+    
     filter_info = {
         "poli": poli_pilihan, "jenis_kelamin": jk_pilihan, "pembiayaan": bayar_pilihan,
-        "kelompok_umur": kelompok_umur_pilihan, "desa": desa_pilihan
+        "kelompok_umur": kelompok_umur_pilihan, "desa": desa_pilihan,
+        "penyakit_dikecualikan": kecuali_penyakit_pilihan
     }
     return df_filtered, filter_info
 
@@ -286,7 +300,10 @@ def show_active_filters(filter_info):
     if not filter_info: return
     chips = []
     for k, v in filter_info.items():
-        if v: chips.append(f"{k.title()}: {', '.join(map(str, v))}")
+        if v: 
+            # Ubah underscore jadi spasi agar label lebih rapi
+            label_bersih = k.replace("_", " ").title()
+            chips.append(f"{label_bersih}: {', '.join(map(str, v))}")
     if chips: st.caption("🎯 **Filter aktif:** " + " | ".join(chips))
 
 # ========= HALAMAN DASHBOARD =========
@@ -812,7 +829,8 @@ def page_cetak_laporan(df_filtered, filter_info):
                 if filter_info and any(filter_info.values()):
                     for k, v in filter_info.items():
                         if v:
-                            pdf.cell(0, 6, f"- {k.title()}: {', '.join(map(str, v))}", ln=True)
+                            label_bersih = k.replace("_", " ").title()
+                            pdf.cell(0, 6, f"- {label_bersih}: {', '.join(map(str, v))}", ln=True)
                 else:
                     pdf.cell(0, 6, "- Menampilkan Semua Data (Tidak ada filter)", ln=True)
                 pdf.ln(5)

@@ -1056,7 +1056,7 @@ def main():
     
     if page == "Ringkasan Umum": page_overview(df_filtered, filter_info)
     elif page == "Analisis Kunjungan": page_kunjungan(df_filtered, filter_info)
-    elif page == "Analisis Penyakit": page_penyakit(df_filtered, filter_info)
+    elif page == "Analisis Diagnosa": page_penyakit(df_filtered, filter_info)
     elif page == "Peta Persebaran": page_peta_persebaran(df_filtered, filter_info)
     elif page == "Analisis Pembiayaan": page_pembiayaan(df_filtered, filter_info)
     elif page == "Data & Unduhan": page_data(df_filtered, filter_info)

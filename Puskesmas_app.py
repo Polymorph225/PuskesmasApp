@@ -60,6 +60,16 @@ def inject_custom_css():
             font-size: 1.05rem;
             font-weight: 800; /* Teks ditebalkan */
         }
+
+        /* ==============================================
+           STYLE UNTUK TOMBOL SORT PENYAKIT
+           ============================================== */
+        .sort-label {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-color);
+            margin-bottom: 0.3rem;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -112,7 +122,6 @@ def get_gemini_client():
 # ================== EKSPOR EXCEL HELPER ==================
 def convert_df_to_excel(df):
     output = io.BytesIO()
-    # Menggunakan engine openpyxl
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Data')
     processed_data = output.getvalue()
@@ -241,7 +250,7 @@ def apply_filters(_):
         # Filter Variables
         date_range = None
         tahun_pilihan = poli_pilihan = jk_pilihan = bayar_pilihan = kelompok_umur_pilihan = desa_pilihan = None
-        kecuali_penyakit_pilihan = None # Variabel Pengecualian Penyakit
+        kecuali_penyakit_pilihan = None
         
         st.markdown("### 🔍 Filter Data")
         
@@ -265,7 +274,6 @@ def apply_filters(_):
             if "pembiayaan" in df.columns:
                 bayar_pilihan = st.multiselect("Pembiayaan", options=sorted(df["pembiayaan"].dropna().unique()))
             
-            # Pilihan Pengecualian Penyakit
             if "diagnosa" in df.columns:
                 kecuali_penyakit_pilihan = st.multiselect(
                     "❌ Kecualikan Penyakit", 
@@ -285,7 +293,6 @@ def apply_filters(_):
     if kelompok_umur_pilihan: df_filtered = df_filtered[df_filtered["kelompok_umur"].isin(kelompok_umur_pilihan)]
     if desa_pilihan: df_filtered = df_filtered[df_filtered["desa"].isin(desa_pilihan)]
     
-    # Membuang data penyakit yang dikecualikan
     if kecuali_penyakit_pilihan:
         df_filtered = df_filtered[~df_filtered["diagnosa"].isin(kecuali_penyakit_pilihan)]
     
@@ -301,7 +308,6 @@ def show_active_filters(filter_info):
     chips = []
     for k, v in filter_info.items():
         if v: 
-            # Ubah underscore jadi spasi agar label lebih rapi
             label_bersih = k.replace("_", " ").title()
             chips.append(f"{label_bersih}: {', '.join(map(str, v))}")
     if chips: st.caption("🎯 **Filter aktif:** " + " | ".join(chips))
@@ -327,7 +333,6 @@ def page_overview(df_filtered, filter_info):
         trend = df_filtered.groupby(["tahun", "bulan", "nama_bulan"]).size().reset_index(name="count").sort_values(["tahun", "bulan"])
         trend["label"] = trend["nama_bulan"].astype(str) + "-" + trend["tahun"].astype(str)
         st.line_chart(trend.set_index("label")["count"])
-        # Tombol Download Excel
         st.download_button("📥 Download Tren Kunjungan (Excel)", convert_df_to_excel(trend), "tren_kunjungan.xlsx")
 
     if "poli" in df_filtered.columns:
@@ -335,7 +340,6 @@ def page_overview(df_filtered, filter_info):
         df_poli = df_filtered["poli"].value_counts().reset_index()
         df_poli.columns = ["Poli", "Jumlah"]
         st.bar_chart(df_poli.set_index("Poli"))
-        # Tombol Download Excel
         st.download_button("📥 Download Distribusi Poli (Excel)", convert_df_to_excel(df_poli), "distribusi_poli.xlsx")
 
 def page_kunjungan(df_filtered, filter_info):
@@ -358,16 +362,154 @@ def page_kunjungan(df_filtered, filter_info):
         col2.bar_chart(df_umur.set_index("Kelompok Umur"))
         col2.download_button("📥 Download Data Umur", convert_df_to_excel(df_umur), "kunjungan_umur.xlsx")
 
+# ================== HALAMAN ANALISIS PENYAKIT (DIPERBARUI) ==================
 def page_penyakit(df_filtered, filter_info):
     st.subheader("🦠 Analisis Penyakit")
     show_active_filters(filter_info)
     if df_filtered is None or len(df_filtered) == 0: return
-    if "diagnosa" in df_filtered.columns:
-        top_n = st.slider("Jumlah diagnosa", 5, 20, 10)
-        df_diag = df_filtered["diagnosa"].value_counts().head(top_n).reset_index()
-        df_diag.columns = ["Diagnosa", "Jumlah Kasus"]
-        st.bar_chart(df_diag.set_index("Diagnosa"))
-        st.download_button("📥 Download Data Top Penyakit (Excel)", convert_df_to_excel(df_diag), "top_penyakit.xlsx")
+
+    if "diagnosa" not in df_filtered.columns:
+        st.error("❌ Kolom 'diagnosa' tidak ditemukan dalam data.")
+        return
+
+    # ── Baris kontrol: slider + urutan + tampilan ──────────────────────────
+    col_slider, col_urutan, col_tampilan = st.columns([2, 2, 1])
+
+    with col_slider:
+        top_n = st.slider("Jumlah diagnosa ditampilkan", min_value=5, max_value=30, value=10, step=1)
+
+    with col_urutan:
+        urutan = st.radio(
+            "Urutkan berdasarkan jumlah kasus:",
+            options=["⬇️ Terbanyak → Tersedikit", "⬆️ Tersedikit → Terbanyak"],
+            index=0,
+            horizontal=True,
+            key="radio_urutan_penyakit"
+        )
+
+    with col_tampilan:
+        orientasi = st.selectbox(
+            "Orientasi grafik",
+            options=["Horizontal", "Vertikal"],
+            index=0,
+            key="select_orientasi_penyakit"
+        )
+
+    # ── Olah data ──────────────────────────────────────────────────────────
+    ascending = urutan.startswith("⬆️")
+
+    df_diag = (
+        df_filtered["diagnosa"]
+        .value_counts()
+        .head(top_n)
+        .reset_index()
+    )
+    df_diag.columns = ["Diagnosa", "Jumlah Kasus"]
+    df_diag = df_diag.sort_values("Jumlah Kasus", ascending=ascending).reset_index(drop=True)
+
+    # Tambah kolom peringkat untuk label hover
+    df_diag["Peringkat"] = df_diag["Jumlah Kasus"].rank(ascending=False, method="min").astype(int)
+
+    # ── Warna gradasi sesuai arah urutan ──────────────────────────────────
+    color_scale = "Blues" if not ascending else "Blues_r"
+
+    # ── Render grafik ──────────────────────────────────────────────────────
+    chart_height = max(350, top_n * 38)
+
+    if orientasi == "Horizontal":
+        # Bar horizontal — terbaik untuk nama diagnosa panjang
+        category_order = "total ascending" if ascending else "total descending"
+
+        fig = px.bar(
+            df_diag,
+            x="Jumlah Kasus",
+            y="Diagnosa",
+            orientation="h",
+            text="Jumlah Kasus",
+            color="Jumlah Kasus",
+            color_continuous_scale=color_scale,
+            custom_data=["Peringkat"],
+            labels={"Jumlah Kasus": "Jumlah Kasus", "Diagnosa": "Diagnosa"},
+        )
+        fig.update_traces(
+            textposition="outside",
+            hovertemplate=(
+                "<b>%{y}</b><br>"
+                "Jumlah Kasus: <b>%{x}</b><br>"
+                "Peringkat: #%{customdata[0]}<extra></extra>"
+            ),
+        )
+        fig.update_layout(
+            yaxis=dict(categoryorder=category_order),
+            coloraxis_showscale=False,
+            margin=dict(l=0, r=70, t=10, b=10),
+            height=chart_height,
+            xaxis_title="Jumlah Kasus",
+            yaxis_title=None,
+        )
+
+    else:
+        # Bar vertikal — cocok jika nama diagnosa pendek / sedikit item
+        category_order = "total descending" if not ascending else "total ascending"
+
+        fig = px.bar(
+            df_diag,
+            x="Diagnosa",
+            y="Jumlah Kasus",
+            orientation="v",
+            text="Jumlah Kasus",
+            color="Jumlah Kasus",
+            color_continuous_scale=color_scale,
+            custom_data=["Peringkat"],
+            labels={"Jumlah Kasus": "Jumlah Kasus", "Diagnosa": "Diagnosa"},
+        )
+        fig.update_traces(
+            textposition="outside",
+            hovertemplate=(
+                "<b>%{x}</b><br>"
+                "Jumlah Kasus: <b>%{y}</b><br>"
+                "Peringkat: #%{customdata[0]}<extra></extra>"
+            ),
+        )
+        fig.update_layout(
+            xaxis=dict(categoryorder=category_order, tickangle=-35),
+            coloraxis_showscale=False,
+            margin=dict(l=10, r=10, t=30, b=10),
+            height=chart_height,
+            xaxis_title=None,
+            yaxis_title="Jumlah Kasus",
+        )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ── Statistik ringkas di bawah grafik ─────────────────────────────────
+    st.markdown("---")
+    total_kasus_tampil = df_diag["Jumlah Kasus"].sum()
+    total_semua_kasus  = len(df_filtered)
+    pct = (total_kasus_tampil / total_semua_kasus * 100) if total_semua_kasus > 0 else 0
+
+    diagnosa_teratas = df_diag.sort_values("Jumlah Kasus", ascending=False).iloc[0]["Diagnosa"]
+    kasus_teratas    = df_diag.sort_values("Jumlah Kasus", ascending=False).iloc[0]["Jumlah Kasus"]
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Total Kasus (ditampilkan)", f"{total_kasus_tampil:,}".replace(",", "."))
+    m2.metric("% dari Seluruh Kunjungan",  f"{pct:.1f}%")
+    m3.metric("Diagnosa Teratas",           diagnosa_teratas, delta=f"{kasus_teratas} kasus", delta_color="off")
+
+    # ── Tabel detail ──────────────────────────────────────────────────────
+    with st.expander("📋 Lihat Tabel Detail", expanded=False):
+        df_tabel = df_diag[["Peringkat", "Diagnosa", "Jumlah Kasus"]].copy()
+        df_tabel["% dari Total"] = (df_tabel["Jumlah Kasus"] / total_semua_kasus * 100).round(2).astype(str) + "%"
+        st.dataframe(df_tabel, use_container_width=True, hide_index=True)
+
+    # ── Download ──────────────────────────────────────────────────────────
+    df_download = df_diag[["Peringkat", "Diagnosa", "Jumlah Kasus"]].copy()
+    st.download_button(
+        label="📥 Download Data Top Penyakit (Excel)",
+        data=convert_df_to_excel(df_download),
+        file_name="top_penyakit.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 # ================== HALAMAN PETA ==================
 def page_peta_persebaran(df_filtered, filter_info):
@@ -401,7 +543,6 @@ def page_peta_persebaran(df_filtered, filter_info):
 
     df_grouped = df_map.groupby(["desa", "diagnosa"]).size().reset_index(name="jumlah_kasus")
 
-    # KOORDINAT DESA KECAMATAN PURWOSARI
     koordinat_desa = {
         "Donan": (-7.2131, 111.6364),
         "Gapluk": (-7.2017, 111.6617),
@@ -444,7 +585,6 @@ def page_peta_persebaran(df_filtered, filter_info):
 
     st.markdown(f"**Menampilkan persebaran pasien untuk:** `{pilihan_penyakit}`")
 
-    # RENDER PETA PLOTLY DENGAN FITUR KLIK
     fig = px.scatter_mapbox(
         df_grouped, 
         lat="latitude", 
@@ -464,7 +604,6 @@ def page_peta_persebaran(df_filtered, filter_info):
     fig.update_layout(mapbox_style=map_style)
     fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
     
-    # Menangkap event klik dari peta
     clicked_desa = None
     try:
         event = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
@@ -480,10 +619,8 @@ def page_peta_persebaran(df_filtered, filter_info):
         if pilihan_fallback != "-- Klik Pilih --":
             clicked_desa = pilihan_fallback
 
-    # Menampilkan Info Klik (Opsional)
     st.info("👆 **TIPS INTERAKTIF:** Klik pada salah satu titik/lingkaran desa di peta untuk melihat profil statistik kesehatannya secara langsung!")
 
-    # JIKA DESA DIKLIK, TAMPILKAN PROFIL DESA TERSEBUT
     if clicked_desa:
         st.markdown("---")
         st.markdown(f"### 📍 Profil Kesehatan Desa: **{clicked_desa}**")
@@ -515,7 +652,6 @@ def page_peta_persebaran(df_filtered, filter_info):
             
         st.caption("ℹ️ *Klik pada area kosong di peta atau klik ulang titik desa untuk menutup profil ini.*")
         
-    # TABEL DAN GRAFIK GLOBAL SEKARANG SELALU TAMPIL DI BAWAH PETA
     st.markdown("---")
     col_tabel, col_grafik = st.columns([1, 1])
     
@@ -551,7 +687,6 @@ def page_ml(df_filtered, filter_info):
         st.error("❌ Kolom 'tanggal_kunjungan' tidak ditemukan.")
         return
 
-    # Filter data ML
     df_ml = df_filtered.copy()
     if not pd.api.types.is_datetime64_any_dtype(df_ml["tanggal_kunjungan"]):
         df_ml["tanggal_kunjungan"] = pd.to_datetime(df_ml["tanggal_kunjungan"], errors="coerce")
@@ -582,7 +717,7 @@ def page_ml(df_filtered, filter_info):
                 "Prediksi Sampai Tanggal:", 
                 value=max_date + pd.Timedelta(days=30), 
                 min_value=max_date + pd.Timedelta(days=1),
-                max_value=max_date + pd.Timedelta(days=365) # Maks 1 tahun
+                max_value=max_date + pd.Timedelta(days=365)
             )
 
     df_item = df_ml[df_ml[kolom_fokus] == pilihan_item].copy()
@@ -591,7 +726,6 @@ def page_ml(df_filtered, filter_info):
         st.error("❌ Data terlalu sedikit (< 10 pasien) untuk dipelajari oleh AI Prophet.")
         return
 
-    # ================= LOGIKA PROPHET =================
     weekly = df_item.groupby(pd.Grouper(key="tanggal_kunjungan", freq="W-MON")).size().reset_index(name="jumlah")
     df_prophet = weekly.rename(columns={"tanggal_kunjungan": "ds", "jumlah": "y"})
 
@@ -614,14 +748,12 @@ def page_ml(df_filtered, filter_info):
     st.markdown(f"### 📈 Grafik Peramalan: **{pilihan_item}**")
     fig = go.Figure()
 
-    # Data Aktual
     fig.add_trace(go.Scatter(
         x=df_prophet['ds'], y=df_prophet['y'], 
         mode='lines+markers', name='Data Aktual',
         line=dict(color='#2563eb', width=2)
     ))
 
-    # Prediksi Masa Depan
     forecast_future = forecast[forecast['ds'] > pd.to_datetime(last_date)]
     fig.add_trace(go.Scatter(
         x=forecast_future['ds'], y=forecast_future['yhat'], 
@@ -629,7 +761,6 @@ def page_ml(df_filtered, filter_info):
         line=dict(color='#ef4444', width=3, dash='dash')
     ))
 
-    # Confidence Interval
     fig.add_trace(go.Scatter(
         x=forecast_future['ds'].tolist() + forecast_future['ds'].tolist()[::-1],
         y=forecast_future['yhat_upper'].tolist() + forecast_future['yhat_lower'].tolist()[::-1],
@@ -646,7 +777,6 @@ def page_ml(df_filtered, filter_info):
     )
     st.plotly_chart(fig, use_container_width=True)
 
-    # TAMBAHAN: Download Data Prediksi
     df_download_pred = forecast_future[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].copy()
     df_download_pred.columns = ['Tanggal', 'Prediksi_Jumlah', 'Batas_Bawah', 'Batas_Atas']
     st.download_button(
@@ -656,7 +786,6 @@ def page_ml(df_filtered, filter_info):
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-    # ================= KESIMPULAN ESTIMASI DENGAN CUSTOM HTML/CSS =================
     st.markdown(f"### 📢 Kesimpulan Estimasi Hingga {pd.to_datetime(target_date).strftime('%d %B %Y')}")
     if not forecast_future.empty:
         total_estimasi = int(round(forecast_future["yhat"].clip(lower=0).sum()))
@@ -710,7 +839,6 @@ def page_ai_assistant(df_filtered, filter_info, is_genai_configured):
         st.error("❌ API Key belum diset. Agent AI tidak dapat digunakan.")
         return
 
-    # --- 1. AI MERANGKUM DATA STATISTIK SAAT INI ---
     total_data = len(df_filtered)
     
     top_diagnosa = "-"
@@ -731,7 +859,6 @@ def page_ai_assistant(df_filtered, filter_info, is_genai_configured):
         desa_series = df_filtered["desa"].value_counts().head(3)
         desa = ", ".join([f"{k} ({v} pasien)" for k, v in desa_series.items()])
 
-    # Menyusun rangkuman data untuk dikirim ke otak AI secara tersembunyi
     context_summary = f"""[STATISTIK DATA PASIEN SAAT INI]
 - Total Pasien/Kunjungan: {total_data}
 - 5 Penyakit Terbanyak: {top_diagnosa}
@@ -739,7 +866,6 @@ def page_ai_assistant(df_filtered, filter_info, is_genai_configured):
 - Demografi Mayoritas: Jenis Kelamin {gender}, Kelompok Usia {umur}
 - 3 Desa Asal Pasien Terbanyak: {desa}"""
 
-    # --- 2. FITUR TRANSPARANSI ---
     with st.expander("👁️ Lihat Konteks Data yang Akan Dikirim ke AI", expanded=False):
         st.markdown("Di balik layar, aplikasi akan menyisipkan ringkasan teks ini kepada AI agar jawaban yang diberikan akurat dan sesuai dengan kondisi Puskesmas berdasarkan filter Anda saat ini:")
         st.code(context_summary, language="markdown")
@@ -796,7 +922,6 @@ def page_cetak_laporan(df_filtered, filter_info):
     if st.button("📄 Buat Dokumen PDF"):
         with st.spinner("Menyusun laporan dan merender grafik..."):
             try:
-                # --- 1. Kalkulasi Data Teks ---
                 total_kunjungan = len(df_filtered)
                 
                 top_diagnosa = []
@@ -807,11 +932,9 @@ def page_cetak_laporan(df_filtered, filter_info):
                 if "poli" in df_filtered.columns:
                     top_poli = df_filtered["poli"].value_counts().head(5).items()
 
-                # --- 2. Setup FPDF (Halaman Teks) ---
                 pdf = FPDF()
                 pdf.add_page()
                 
-                # Header Kop Surat
                 pdf.set_font("Arial", 'B', 16)
                 pdf.cell(0, 8, "LAPORAN RINGKASAN KUNJUNGAN PASIEN", ln=True, align='C')
                 pdf.set_font("Arial", 'B', 14)
@@ -822,7 +945,6 @@ def page_cetak_laporan(df_filtered, filter_info):
                 pdf.line(10, 35, 200, 35)
                 pdf.ln(10)
 
-                # Informasi Filter
                 pdf.set_font("Arial", 'B', 12)
                 pdf.cell(0, 8, "1. Parameter Filter Aktif", ln=True)
                 pdf.set_font("Arial", '', 11)
@@ -835,7 +957,6 @@ def page_cetak_laporan(df_filtered, filter_info):
                     pdf.cell(0, 6, "- Menampilkan Semua Data (Tidak ada filter)", ln=True)
                 pdf.ln(5)
 
-                # Ringkasan Kunjungan
                 pdf.set_font("Arial", 'B', 12)
                 pdf.cell(0, 8, "2. Ringkasan Kunjungan", ln=True)
                 pdf.set_font("Arial", '', 11)
@@ -844,7 +965,6 @@ def page_cetak_laporan(df_filtered, filter_info):
                     pdf.cell(0, 6, f"Total Pasien Unik (RM) : {df_filtered['no_rm'].nunique()} pasien", ln=True)
                 pdf.ln(5)
 
-                # Top 5 Penyakit
                 if top_diagnosa:
                     pdf.set_font("Arial", 'B', 12)
                     pdf.cell(0, 8, "3. Top 5 Diagnosa Penyakit Terbanyak", ln=True)
@@ -853,7 +973,6 @@ def page_cetak_laporan(df_filtered, filter_info):
                         pdf.cell(0, 6, f"{i}. {penyakit} ({jumlah} kasus)", ln=True)
                     pdf.ln(5)
 
-                # Demografi Jenis Kelamin
                 if "jenis_kelamin" in df_filtered.columns:
                     pdf.set_font("Arial", 'B', 12)
                     pdf.cell(0, 8, "4. Demografi Jenis Kelamin", ln=True)
@@ -862,22 +981,19 @@ def page_cetak_laporan(df_filtered, filter_info):
                     for jk, jml in jk_counts.items():
                         pdf.cell(0, 6, f"- {jk}: {jml} pasien", ln=True)
 
-                # --- 3. PEMBUATAN HALAMAN GRAFIK (LAMPIRAN) ---
                 pdf.add_page()
                 pdf.set_font("Arial", 'B', 14)
                 pdf.cell(0, 10, "LAMPIRAN VISUALISASI DATA", ln=True, align='C')
                 pdf.line(10, 20, 200, 20)
                 pdf.ln(5)
 
-                temp_images = [] # Untuk menyimpan path gambar sementara agar bisa dihapus nanti
+                temp_images = []
 
-                # Grafik 1: Distribusi Penyakit (Bar Chart)
                 if "diagnosa" in df_filtered.columns:
                     top10_df = df_filtered["diagnosa"].value_counts().head(10).reset_index()
                     top10_df.columns = ['Diagnosa', 'Jumlah']
                     fig_diag = px.bar(top10_df, x='Diagnosa', y='Jumlah', title="Top 10 Diagnosa Penyakit", text_auto=True)
                     
-                    # Simpan gambar sementara
                     fd, path_diag = tempfile.mkstemp(suffix=".png")
                     fig_diag.write_image(path_diag, engine="kaleido", width=800, height=500)
                     temp_images.append(path_diag)
@@ -887,14 +1003,12 @@ def page_cetak_laporan(df_filtered, filter_info):
                     pdf.image(path_diag, x=15, w=180)
                     pdf.ln(5)
 
-                # Grafik 2: Tren Kunjungan Waktu (Line Chart)
                 if "tanggal_kunjungan" in df_filtered.columns:
                     trend = df_filtered.groupby(["tahun", "bulan", "nama_bulan"]).size().reset_index(name="count").sort_values(["tahun", "bulan"])
                     if not trend.empty:
                         trend["Periode"] = trend["nama_bulan"].astype(str) + " " + trend["tahun"].astype(str)
                         fig_trend = px.line(trend, x="Periode", y="count", title="Tren Kunjungan Pasien Berdasarkan Bulan", markers=True)
                         
-                        # Simpan gambar sementara
                         fd, path_trend = tempfile.mkstemp(suffix=".png")
                         fig_trend.write_image(path_trend, engine="kaleido", width=800, height=400)
                         temp_images.append(path_trend)
@@ -904,20 +1018,17 @@ def page_cetak_laporan(df_filtered, filter_info):
                         pdf.image(path_trend, x=15, w=180)
                         pdf.ln(5)
 
-                # --- 4. Simpan ke PDF dan Bersihkan File Temporary ---
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
                     pdf.output(tmp_pdf.name)
                     with open(tmp_pdf.name, "rb") as f:
                         pdf_bytes = f.read()
 
-                # Hapus gambar grafik sementara dari memori server
                 for img_path in temp_images:
                     if os.path.exists(img_path):
                         os.remove(img_path)
 
                 st.success("✅ Laporan PDF beserta grafik berhasil dibuat!")
                 
-                # Tombol Download
                 st.download_button(
                     label="📥 Download Laporan PDF (Teks & Grafik)",
                     data=pdf_bytes,

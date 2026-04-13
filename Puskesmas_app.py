@@ -62,7 +62,7 @@ def inject_custom_css():
         }
 
         /* ==============================================
-           STYLE UNTUK TOMBOL SORT DIAGNOSIS
+           STYLE UNTUK TOMBOL SORT PENYAKIT
            ============================================== */
         .sort-label {
             font-size: 0.85rem;
@@ -276,9 +276,9 @@ def apply_filters(_):
             
             if "diagnosa" in df.columns:
                 kecuali_penyakit_pilihan = st.multiselect(
-                    "❌ Kecualikan Diagnosis", 
+                    "❌ Kecualikan Penyakit", 
                     options=sorted(df["diagnosa"].dropna().unique()),
-                    help="Diagnosis yang dipilih di sini TIDAK AKAN diikutkan dalam analisis."
+                    help="Penyakit yang dipilih di sini TIDAK AKAN diikutkan dalam analisis."
                 )
 
     # Apply Logic
@@ -362,9 +362,9 @@ def page_kunjungan(df_filtered, filter_info):
         col2.bar_chart(df_umur.set_index("Kelompok Umur"))
         col2.download_button("📥 Download Data Umur", convert_df_to_excel(df_umur), "kunjungan_umur.xlsx")
 
-# ================== HALAMAN ANALISIS Diagnosis (DIPERBARUI) ==================
+# ================== HALAMAN ANALISIS PENYAKIT (DIPERBARUI) ==================
 def page_penyakit(df_filtered, filter_info):
-    st.subheader("🦠 Analisis Diagnosis")
+    st.subheader("🦠 Analisis Penyakit")
     show_active_filters(filter_info)
     if df_filtered is None or len(df_filtered) == 0: return
 
@@ -505,7 +505,7 @@ def page_penyakit(df_filtered, filter_info):
     # ── Download ──────────────────────────────────────────────────────────
     df_download = df_diag[["Peringkat", "Diagnosa", "Jumlah Kasus"]].copy()
     st.download_button(
-        label="📥 Download Data Top Diagnosis (Excel)",
+        label="📥 Download Data Top Penyakit (Excel)",
         data=convert_df_to_excel(df_download),
         file_name="top_penyakit.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -513,7 +513,7 @@ def page_penyakit(df_filtered, filter_info):
 
 # ================== HALAMAN PETA ==================
 def page_peta_persebaran(df_filtered, filter_info):
-    st.subheader("🗺️ Peta Persebaran")
+    st.subheader("🗺️ Peta Persebaran Penyakit")
     show_active_filters(filter_info)
     
     if df_filtered is None or len(df_filtered) == 0:
@@ -1056,7 +1056,7 @@ def main():
     
     if page == "Ringkasan Umum": page_overview(df_filtered, filter_info)
     elif page == "Analisis Kunjungan": page_kunjungan(df_filtered, filter_info)
-    elif page == "Analisis Diagnosa": page_penyakit(df_filtered, filter_info)
+    elif page == "Analisis Penyakit": page_penyakit(df_filtered, filter_info)
     elif page == "Peta Persebaran": page_peta_persebaran(df_filtered, filter_info)
     elif page == "Analisis Pembiayaan": page_pembiayaan(df_filtered, filter_info)
     elif page == "Data & Unduhan": page_data(df_filtered, filter_info)

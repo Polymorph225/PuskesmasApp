@@ -728,11 +728,10 @@ def _bangun_model_prophet(df_prophet: pd.DataFrame, n_minggu: int,
     """
     Membangun dan melatih model Prophet dengan semua peningkatan kualitas:
     1. Deteksi & koreksi outlier (IQR)
-    2. Transformasi log untuk stabilisasi variansi
-    3. Seasonality bulanan kustom
-    4. Hari libur nasional Indonesia
-    5. Tuning changepoint & seasonality prior scale
-    6. Floor & cap (logistic growth jika variance tinggi)
+    2. Seasonality bulanan kustom
+    3. Hari libur nasional Indonesia
+    4. Tuning changepoint & seasonality prior scale
+    5. Floor & cap (logistic growth jika variance tinggi)
     Mengembalikan (model, forecast, df_train_final)
     """
     df = df_prophet.copy()
@@ -742,34 +741,46 @@ def _bangun_model_prophet(df_prophet: pd.DataFrame, n_minggu: int,
     df = df.set_index("ds").reindex(full_range, fill_value=0).reset_index()
     df.columns = ["ds", "y"]
 
+    # ── PENTING: paksa kolom y menjadi float64 ─────────────────────────────
+    # Prophet memerlukan y bertipe float, bukan int atau campuran.
+    df["y"] = df["y"].astype(float)
+
     # ── 2. Deteksi & koreksi outlier ──────────────────────────────────────
     if use_outlier_cap:
         df["y"] = _deteksi_outlier_iqr(df["y"])
 
-    # ── 3. Tentukan floor & cap ────────────────────────────────────────────
-    floor_val = 0
-    cap_val   = max(df["y"].max() * 1.5, df["y"].mean() * 3)
-    df["floor"] = floor_val
-    df["cap"]   = cap_val
+    # ── 3. Pastikan tidak ada NaN / Inf pada y ────────────────────────────
+    df["y"] = pd.to_numeric(df["y"], errors="coerce").fillna(0.0).clip(lower=0.0)
+
+    # ── 4. Tentukan floor & cap (float eksplisit) ─────────────────────────
+    floor_val = float(0)
+    cap_val   = float(max(df["y"].max() * 1.5, df["y"].mean() * 3, 1.0))
 
     # Cek apakah lebih cocok logistic (variance tinggi) atau linear
-    cv = df["y"].std() / (df["y"].mean() + 1e-9)
+    mean_y = df["y"].mean()
+    cv = df["y"].std() / (mean_y + 1e-9)
     use_logistic = cv > 0.6
 
     growth = "logistic" if use_logistic else "linear"
-    if growth == "linear":
-        df = df.drop(columns=["floor", "cap"])
+    if growth == "logistic":
+        df["floor"] = floor_val
+        df["cap"]   = cap_val
 
-    # ── 4. Siapkan hari libur ─────────────────────────────────────────────
-    tahun_list = list(range(df["ds"].dt.year.min(), df["ds"].dt.year.max() + 2))
+    # ── 5. Mode seasonality: gunakan additive jika banyak nol ─────────────
+    # multiplicative tidak cocok ketika ada nilai y = 0 (NaN/inf saat dibagi)
+    zero_ratio = (df["y"] == 0).sum() / len(df)
+    season_mode = "additive" if zero_ratio > 0.2 else "multiplicative"
+
+    # ── 6. Siapkan hari libur ─────────────────────────────────────────────
+    tahun_list = list(range(int(df["ds"].dt.year.min()), int(df["ds"].dt.year.max()) + 2))
     df_libur   = _get_hari_libur_indonesia(tahun_list) if use_libur else None
 
-    # ── 5. Bangun model Prophet ───────────────────────────────────────────
+    # ── 7. Bangun model Prophet ───────────────────────────────────────────
     model_kwargs = dict(
         growth=growth,
-        changepoint_prior_scale=changepoint_scale,   # fleksibilitas tren
-        seasonality_prior_scale=seasonality_scale,   # kekuatan seasonality
-        seasonality_mode="multiplicative",            # lebih akurat untuk data count
+        changepoint_prior_scale=changepoint_scale,
+        seasonality_prior_scale=seasonality_scale,
+        seasonality_mode=season_mode,
         yearly_seasonality=True if len(df) >= 52 else False,
         weekly_seasonality=False,
         daily_seasonality=False,
@@ -780,19 +791,19 @@ def _bangun_model_prophet(df_prophet: pd.DataFrame, n_minggu: int,
 
     model = Prophet(**model_kwargs)
 
-    # ── 6. Tambah seasonality bulanan kustom ──────────────────────────────
+    # ── 8. Tambah seasonality bulanan kustom ──────────────────────────────
     if use_monthly and len(df) >= 24:
         model.add_seasonality(
             name="monthly",
             period=30.5,
-            fourier_order=5,   # lebih ekspresif dari default
-            mode="multiplicative",
+            fourier_order=5,
+            mode=season_mode,
         )
 
-    # ── 7. Fit ────────────────────────────────────────────────────────────
+    # ── 9. Fit ────────────────────────────────────────────────────────────
     model.fit(df)
 
-    # ── 8. Prediksi ───────────────────────────────────────────────────────
+    # ── 10. Prediksi ──────────────────────────────────────────────────────
     future = model.make_future_dataframe(periods=n_minggu, freq="W-MON")
     if growth == "logistic":
         future["floor"] = floor_val

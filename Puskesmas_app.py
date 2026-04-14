@@ -900,9 +900,9 @@ def page_ml(df_filtered, filter_info):
     )
     df_prophet_raw = weekly.rename(columns={"tanggal_kunjungan": "ds", "jumlah": "y"})
 
-    last_date    = df_prophet_raw["ds"].max().date()
-    target_dt    = pd.to_datetime(target_date).date()
-    delta_days   = (target_dt - last_date).days
+    last_date     = df_prophet_raw["ds"].max().date()
+    target_dt     = pd.to_datetime(target_date).date()
+    delta_days    = (target_dt - last_date).days
     periods_ahead = max(1, delta_days // 7)
 
     # ── Tampilkan Data Rekap ──────────────────────────────────────────────
@@ -910,9 +910,29 @@ def page_ml(df_filtered, filter_info):
         st.dataframe(df_prophet_raw.rename(columns={"ds": "Periode (Minggu)", "y": "Jumlah Pasien"}),
                      use_container_width=True)
 
-    # ── Training & Forecasting ────────────────────────────────────────────
-    with st.spinner("🔄 Model sedang dilatih dengan semua peningkatan akurasi..."):
+    # ── Training: evaluasi out-of-sample + model prediksi penuh ──────────
+    # Evaluasi menggunakan metode IDENTIK dengan halaman Evaluasi Akurasi:
+    # 80% training, 20% test, pre-processing lewat _bangun_model_prophet,
+    # parameter sama persis → skor badge di kedua halaman akan konsisten.
+    n_total_q  = len(df_prophet_raw)
+    n_test_q   = max(4, int(n_total_q * 0.20))
+    n_train_q  = n_total_q - n_test_q
+    df_train_q = df_prophet_raw.iloc[:n_train_q].copy()
+    df_test_q  = df_prophet_raw.iloc[n_train_q:].copy()
+
+    with st.spinner("🔄 Model sedang dilatih dan dievaluasi..."):
         try:
+            # Model untuk evaluasi (hanya dilatih pada 80% data)
+            _, forecast_q, _ = _bangun_model_prophet(
+                df_prophet=df_train_q,
+                n_minggu=n_test_q,
+                use_monthly=use_monthly,
+                use_outlier_cap=use_outlier_cap,
+                use_libur=use_libur,
+                changepoint_scale=changepoint_scale,
+                seasonality_scale=seasonality_scale,
+            )
+            # Model utama untuk prediksi masa depan (seluruh data)
             model, forecast, df_prophet_clean = _bangun_model_prophet(
                 df_prophet=df_prophet_raw,
                 n_minggu=periods_ahead,
@@ -926,34 +946,33 @@ def page_ml(df_filtered, filter_info):
             st.error(f"❌ Gagal melatih model: {e}")
             return
 
-    # ── Evaluasi Cepat (In-sample MAPE) ──────────────────────────────────
-    forecast_insample = forecast[forecast["ds"].isin(df_prophet_clean["ds"])].copy()
+    # Hitung metrik out-of-sample (sama persis dengan halaman Evaluasi Akurasi)
+    forecast_q_test = forecast_q[forecast_q["ds"].isin(df_test_q["ds"])].copy()
     df_eval_q = pd.merge(
-        df_prophet_clean[["ds", "y"]],
-        forecast_insample[["ds", "yhat"]],
+        df_test_q[["ds", "y"]].rename(columns={"y": "Aktual"}),
+        forecast_q_test[["ds", "yhat"]].rename(columns={"yhat": "Prediksi"}),
         on="ds", how="inner"
     )
-    df_eval_q = df_eval_q[df_eval_q["y"] > 0]
+    df_eval_q = df_eval_q[df_eval_q["Aktual"] > 0]
+
     if len(df_eval_q) > 0:
-        mape_insample = float(np.mean(np.abs((df_eval_q["y"] - df_eval_q["yhat"]) / df_eval_q["y"])) * 100)
-        r2_insample_ss_res = float(np.sum((df_eval_q["y"] - df_eval_q["yhat"]) ** 2))
-        r2_insample_ss_tot = float(np.sum((df_eval_q["y"] - df_eval_q["y"].mean()) ** 2))
-        r2_insample = 1 - r2_insample_ss_res / r2_insample_ss_tot if r2_insample_ss_tot != 0 else float("nan")
-
-        if mape_insample <= 10 and r2_insample >= 0.85:
-            badge_color, badge_text = "#16a34a", f"🟢 Sangat Baik (MAPE {mape_insample:.1f}%, R² {r2_insample:.3f})"
-        elif mape_insample <= 20 and r2_insample >= 0.70:
-            badge_color, badge_text = "#ca8a04", f"🟡 Cukup Baik (MAPE {mape_insample:.1f}%, R² {r2_insample:.3f})"
-        else:
-            badge_color, badge_text = "#dc2626", f"🔴 Perlu Data Lebih Banyak (MAPE {mape_insample:.1f}%)"
-
-        st.markdown(f"""
-        <div style="display:inline-flex;align-items:center;gap:0.6rem;padding:0.35rem 1rem;
-             border-radius:999px;background:{badge_color}22;border:1.5px solid {badge_color};
-             color:{badge_color};font-weight:700;font-size:0.95rem;margin-bottom:0.5rem;">
-            Kualitas Fit Model: {badge_text}
-        </div>
-        """, unsafe_allow_html=True)
+        metrik_q      = _hitung_metrik(df_eval_q["Aktual"].values, df_eval_q["Prediksi"].values)
+        mape_q        = metrik_q["MAPE (%)"]
+        r2_q          = metrik_q["R²"]
+        label_q, badge_color = _interpretasi_akurasi(mape_q, r2_q)
+        st.markdown(
+            f'''<div style="display:inline-flex;align-items:center;gap:0.6rem;padding:0.35rem 1rem;
+                 border-radius:999px;background:{badge_color}22;border:1.5px solid {badge_color};
+                 color:{badge_color};font-weight:700;font-size:0.95rem;margin-bottom:0.3rem;">
+                Kualitas Model: {label_q} &nbsp;|&nbsp;
+                MAPE {mape_q:.1f}% &nbsp;|&nbsp; R² {r2_q:.3f}
+            </div>
+            <div style="font-size:0.8rem;color:var(--color-text-secondary);margin-bottom:0.8rem;">
+                Dihitung dengan metode yang sama seperti halaman
+                📐 Evaluasi Akurasi Model (20% data terbaru sebagai test set)
+            </div>''',
+            unsafe_allow_html=True,
+        )
 
     # ── Grafik Utama ──────────────────────────────────────────────────────
     st.markdown(f"### 📈 Grafik Peramalan: **{pilihan_item}**")
@@ -1393,11 +1412,31 @@ def page_evaluasi_akurasi(df_filtered, filter_info):
         .reset_index(name="jumlah")
     )
     df_prophet_eval = weekly_eval.rename(columns={"tanggal_kunjungan": "ds", "jumlah": "y"})
-    df_prophet_eval = df_prophet_eval[df_prophet_eval["y"] > 0].reset_index(drop=True)
+    # TIDAK memfilter y>0 di sini — pre-processing diserahkan ke _bangun_model_prophet
+    # agar identik dengan cara page_ml memproses data (zero-fill + outlier IQR di dalam helper)
+    df_prophet_eval = df_prophet_eval.reset_index(drop=True)
 
     if len(df_prophet_eval) < 15:
         st.error(f"❌ Data mingguan untuk '{pilihan_item_eval}' terlalu sedikit ({len(df_prophet_eval)} minggu). Minimal 15 minggu.")
         return
+
+    # ── Pengaturan Parameter (harus sama dengan page_ml agar skor konsisten) ──
+    with st.expander("⚙️ Pengaturan Parameter Model — samakan dengan halaman Prediksi ML", expanded=False):
+        st.info("💡 Agar skor di sini sama dengan badge di halaman **Prediksi ML**, pastikan pengaturan di bawah ini identik dengan yang dipilih di halaman tersebut.")
+        ep1, ep2 = st.columns(2)
+        with ep1:
+            use_outlier_eval = st.toggle("🧹 Koreksi Outlier (IQR)", value=True, key="eval_outlier")
+            use_libur_eval   = st.toggle("🗓️ Hari Libur Nasional", value=True, key="eval_libur")
+            use_monthly_eval = st.toggle("📅 Pola Musiman Bulanan", value=True, key="eval_monthly")
+        with ep2:
+            cp_scale_eval = st.select_slider(
+                "🔧 Changepoint Scale",
+                options=[0.01, 0.05, 0.1, 0.3, 0.5], value=0.1, key="eval_cp"
+            )
+            ss_scale_eval = st.select_slider(
+                "🌊 Seasonality Scale",
+                options=[1.0, 5.0, 10.0, 20.0], value=10.0, key="eval_ss"
+            )
 
     n_total  = len(df_prophet_eval)
     n_test   = max(4, int(n_total * test_pct / 100))
@@ -1418,14 +1457,16 @@ def page_evaluasi_akurasi(df_filtered, filter_info):
 
     with st.spinner(f"🔄 Model sedang belajar dari {n_train} minggu data training..."):
         try:
+            # Gunakan parameter yang sama persis dengan page_ml
+            # agar skor di kedua halaman bisa dibandingkan secara adil
             model_eval, forecast_eval_full, df_train_clean = _bangun_model_prophet(
                 df_prophet=df_train_eval,
                 n_minggu=n_test,
-                use_monthly=True,
-                use_outlier_cap=True,
-                use_libur=True,
-                changepoint_scale=0.1,
-                seasonality_scale=10.0,
+                use_monthly=use_monthly_eval,
+                use_outlier_cap=use_outlier_eval,
+                use_libur=use_libur_eval,
+                changepoint_scale=cp_scale_eval,
+                seasonality_scale=ss_scale_eval,
             )
         except Exception as e:
             st.error(f"❌ Gagal melatih model evaluasi: {e}")
@@ -1613,7 +1654,7 @@ def main():
     page = st.sidebar.radio("Navigasi", [
         "Ringkasan Umum", "Analisis Kunjungan", "Analisis Penyakit", 
         "Peta Persebaran", "Analisis Pembiayaan", "Data & Unduhan", 
-        "Kualitas Data", "Prediksi ML", "Evaluasi Akurasi Model",
+        "Kualitas Data", "Prediksi ML", "📐 Evaluasi Akurasi Model",
         "Agent AI", "Cetak Laporan PDF"
     ])
     
@@ -1625,7 +1666,7 @@ def main():
     elif page == "Data & Unduhan": page_data(df_filtered, filter_info)
     elif page == "Kualitas Data": page_quality(df_filtered)
     elif page == "Prediksi ML": page_ml(df_filtered, filter_info)
-    elif page == "Evaluasi Akurasi Model": page_evaluasi_akurasi(df_filtered, filter_info)
+    elif page == "📐 Evaluasi Akurasi Model": page_evaluasi_akurasi(df_filtered, filter_info)
     elif page == "Agent AI": page_ai_assistant(df_filtered, filter_info, is_genai_configured)
     elif page == "Cetak Laporan PDF": page_cetak_laporan(df_filtered, filter_info)
 

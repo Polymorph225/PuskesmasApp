@@ -13,6 +13,7 @@ import tempfile
 # Library Machine Learning & AI
 import google.generativeai as genai
 from prophet import Prophet
+from prophet.diagnostics import cross_validation, performance_metrics
 
 # ========== KONFIGURASI HALAMAN ==========
 st.set_page_config(
@@ -55,11 +56,27 @@ def inject_custom_css():
            KELAS KHUSUS UNTUK TEKS ESTIMASI PROPHET
            ============================================== */
         .highlight-estimasi {
-            color: #1d4ed8 !important; /* Warna Biru Tua/Tegas */
+            color: #1d4ed8 !important;
             line-height: 1.5;
             font-size: 1.05rem;
-            font-weight: 800; /* Teks ditebalkan */
+            font-weight: 800;
         }
+
+        /* ==============================================
+           STYLE UNTUK BADGE AKURASI
+           ============================================== */
+        .akurasi-badge {
+            display: inline-block;
+            padding: 0.4rem 1rem;
+            border-radius: 999px;
+            font-size: 1rem;
+            font-weight: 700;
+            margin-top: 0.5rem;
+        }
+        .akurasi-hijau  { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+        .akurasi-kuning { background: #fef9c3; color: #854d0e; border: 1px solid #fde047; }
+        .akurasi-oranye { background: #ffedd5; color: #9a3412; border: 1px solid #fdba74; }
+        .akurasi-merah  { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
 
         /* ==============================================
            STYLE UNTUK TOMBOL SORT PENYAKIT
@@ -247,7 +264,6 @@ def apply_filters(_):
         st.success("Data berhasil dimuat ✅")
         st.caption(f"📊 {len(df):,} baris • {len(df.columns)} kolom".replace(",", "."))
 
-        # Filter Variables
         date_range = None
         tahun_pilihan = poli_pilihan = jk_pilihan = bayar_pilihan = kelompok_umur_pilihan = desa_pilihan = None
         kecuali_penyakit_pilihan = None
@@ -281,7 +297,6 @@ def apply_filters(_):
                     help="Penyakit yang dipilih di sini TIDAK AKAN diikutkan dalam analisis."
                 )
 
-    # Apply Logic
     df_filtered = df.copy()
     if date_range and len(date_range) == 2:
         df_filtered = df_filtered[(df_filtered["tanggal_kunjungan"].dt.date >= date_range[0]) & 
@@ -292,7 +307,6 @@ def apply_filters(_):
     if bayar_pilihan: df_filtered = df_filtered[df_filtered["pembiayaan"].isin(bayar_pilihan)]
     if kelompok_umur_pilihan: df_filtered = df_filtered[df_filtered["kelompok_umur"].isin(kelompok_umur_pilihan)]
     if desa_pilihan: df_filtered = df_filtered[df_filtered["desa"].isin(desa_pilihan)]
-    
     if kecuali_penyakit_pilihan:
         df_filtered = df_filtered[~df_filtered["diagnosa"].isin(kecuali_penyakit_pilihan)]
     
@@ -362,7 +376,6 @@ def page_kunjungan(df_filtered, filter_info):
         col2.bar_chart(df_umur.set_index("Kelompok Umur"))
         col2.download_button("📥 Download Data Umur", convert_df_to_excel(df_umur), "kunjungan_umur.xlsx")
 
-# ================== HALAMAN ANALISIS PENYAKIT (DIPERBARUI) ==================
 def page_penyakit(df_filtered, filter_info):
     st.subheader("🦠 Analisis Penyakit")
     show_active_filters(filter_info)
@@ -372,7 +385,6 @@ def page_penyakit(df_filtered, filter_info):
         st.error("❌ Kolom 'diagnosa' tidak ditemukan dalam data.")
         return
 
-    # ── Baris kontrol: slider + urutan + tampilan ──────────────────────────
     col_slider, col_urutan, col_tampilan = st.columns([2, 2, 1])
 
     with col_slider:
@@ -395,7 +407,6 @@ def page_penyakit(df_filtered, filter_info):
             key="select_orientasi_penyakit"
         )
 
-    # ── Olah data ──────────────────────────────────────────────────────────
     ascending = urutan.startswith("⬆️")
 
     df_diag = (
@@ -406,20 +417,13 @@ def page_penyakit(df_filtered, filter_info):
     )
     df_diag.columns = ["Diagnosa", "Jumlah Kasus"]
     df_diag = df_diag.sort_values("Jumlah Kasus", ascending=ascending).reset_index(drop=True)
-
-    # Tambah kolom peringkat untuk label hover
     df_diag["Peringkat"] = df_diag["Jumlah Kasus"].rank(ascending=False, method="min").astype(int)
 
-    # ── Warna gradasi sesuai arah urutan ──────────────────────────────────
     color_scale = "Blues" if not ascending else "Blues_r"
-
-    # ── Render grafik ──────────────────────────────────────────────────────
     chart_height = max(350, top_n * 38)
 
     if orientasi == "Horizontal":
-        # Bar horizontal — terbaik untuk nama diagnosa panjang
         category_order = "total ascending" if ascending else "total descending"
-
         fig = px.bar(
             df_diag,
             x="Jumlah Kasus",
@@ -447,11 +451,8 @@ def page_penyakit(df_filtered, filter_info):
             xaxis_title="Jumlah Kasus",
             yaxis_title=None,
         )
-
     else:
-        # Bar vertikal — cocok jika nama diagnosa pendek / sedikit item
         category_order = "total descending" if not ascending else "total ascending"
-
         fig = px.bar(
             df_diag,
             x="Diagnosa",
@@ -482,7 +483,6 @@ def page_penyakit(df_filtered, filter_info):
 
     st.plotly_chart(fig, use_container_width=True)
 
-    # ── Statistik ringkas di bawah grafik ─────────────────────────────────
     st.markdown("---")
     total_kasus_tampil = df_diag["Jumlah Kasus"].sum()
     total_semua_kasus  = len(df_filtered)
@@ -496,13 +496,11 @@ def page_penyakit(df_filtered, filter_info):
     m2.metric("% dari Seluruh Kunjungan",  f"{pct:.1f}%")
     m3.metric("Diagnosa Teratas",           diagnosa_teratas, delta=f"{kasus_teratas} kasus", delta_color="off")
 
-    # ── Tabel detail ──────────────────────────────────────────────────────
     with st.expander("📋 Lihat Tabel Detail", expanded=False):
         df_tabel = df_diag[["Peringkat", "Diagnosa", "Jumlah Kasus"]].copy()
         df_tabel["% dari Total"] = (df_tabel["Jumlah Kasus"] / total_semua_kasus * 100).round(2).astype(str) + "%"
         st.dataframe(df_tabel, use_container_width=True, hide_index=True)
 
-    # ── Download ──────────────────────────────────────────────────────────
     df_download = df_diag[["Peringkat", "Diagnosa", "Jumlah Kasus"]].copy()
     st.download_button(
         label="📥 Download Data Top Penyakit (Excel)",
@@ -511,7 +509,6 @@ def page_penyakit(df_filtered, filter_info):
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
-# ================== HALAMAN PETA ==================
 def page_peta_persebaran(df_filtered, filter_info):
     st.subheader("🗺️ Peta Persebaran Penyakit")
     show_active_filters(filter_info)
@@ -564,43 +561,34 @@ def page_peta_persebaran(df_filtered, filter_info):
         desa_bersih = str(nama_desa).strip().title()
         return koordinat_desa.get(desa_bersih, koordinat_default)
 
-    df_grouped["latitude"] = df_grouped["desa"].apply(lambda x: get_koordinat(x)[0])
+    df_grouped["latitude"]  = df_grouped["desa"].apply(lambda x: get_koordinat(x)[0])
     df_grouped["longitude"] = df_grouped["desa"].apply(lambda x: get_koordinat(x)[1])
 
     st.markdown("---")
-    total_kasus = df_grouped["jumlah_kasus"].sum()
-    total_desa = df_grouped["desa"].nunique()
-    
-    desa_agregat = df_grouped.groupby("desa")["jumlah_kasus"].sum()
-    desa_tertinggi = desa_agregat.idxmax() if not desa_agregat.empty else "-"
-    kasus_tertinggi = desa_agregat.max() if not desa_agregat.empty else 0
+    total_kasus   = df_grouped["jumlah_kasus"].sum()
+    total_desa    = df_grouped["desa"].nunique()
+    desa_agregat  = df_grouped.groupby("desa")["jumlah_kasus"].sum()
+    desa_tertinggi  = desa_agregat.idxmax() if not desa_agregat.empty else "-"
+    kasus_tertinggi = desa_agregat.max()    if not desa_agregat.empty else 0
 
     col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric(label="Total Kasus Terpeta", value=f"{total_kasus} Pasien")
-    with col2:
-        st.metric(label="Total Desa Terdampak", value=f"{total_desa} Desa")
-    with col3:
-        st.metric(label="Desa Kasus Tertinggi", value=f"{desa_tertinggi}", delta=f"{kasus_tertinggi} Kasus", delta_color="off")
+    col1.metric(label="Total Kasus Terpeta",   value=f"{total_kasus} Pasien")
+    col2.metric(label="Total Desa Terdampak",  value=f"{total_desa} Desa")
+    col3.metric(label="Desa Kasus Tertinggi",  value=f"{desa_tertinggi}", delta=f"{kasus_tertinggi} Kasus", delta_color="off")
 
     st.markdown(f"**Menampilkan persebaran pasien untuk:** `{pilihan_penyakit}`")
 
     fig = px.scatter_mapbox(
         df_grouped, 
-        lat="latitude", 
-        lon="longitude", 
-        color="diagnosa",
-        size="jumlah_kasus",
+        lat="latitude", lon="longitude", 
+        color="diagnosa", size="jumlah_kasus",
         hover_name="desa",
         custom_data=["desa"], 
         hover_data={"latitude": False, "longitude": False, "diagnosa": True, "jumlah_kasus": True, "desa": False},
         color_discrete_sequence=px.colors.qualitative.Plotly, 
-        zoom=11.5, 
-        center={"lat": -7.218, "lon": 111.675}, 
-        height=550,
-        size_max=35 
+        zoom=11.5, center={"lat": -7.218, "lon": 111.675}, 
+        height=550, size_max=35 
     )
-    
     fig.update_layout(mapbox_style=map_style)
     fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
     
@@ -624,20 +612,15 @@ def page_peta_persebaran(df_filtered, filter_info):
     if clicked_desa:
         st.markdown("---")
         st.markdown(f"### 📍 Profil Kesehatan Desa: **{clicked_desa}**")
-        
         df_desa = df_filtered[df_filtered["desa"] == clicked_desa]
-        
         if len(df_desa) > 0:
             c1, c2, c3 = st.columns(3)
             c1.metric("Total Kunjungan", f"{len(df_desa)} Pasien")
-            
             penyakit_terbanyak = df_desa["diagnosa"].mode()[0] if "diagnosa" in df_desa.columns and not df_desa["diagnosa"].empty else "-"
             c2.metric("Penyakit Dominan", penyakit_terbanyak)
-            
             if "jenis_kelamin" in df_desa.columns:
                 mayoritas_gender = df_desa["jenis_kelamin"].mode()[0] if not df_desa["jenis_kelamin"].empty else "-"
                 c3.metric("Mayoritas Gender", mayoritas_gender)
-            
             col_d1, col_d2 = st.columns(2)
             with col_d1:
                 st.markdown("**Top 5 Penyakit Terbanyak**")
@@ -646,19 +629,15 @@ def page_peta_persebaran(df_filtered, filter_info):
                 st.markdown("**Demografi Usia Pasien**")
                 if "kelompok_umur" in df_desa.columns:
                     st.bar_chart(df_desa["kelompok_umur"].value_counts().sort_index())
-                    
         else:
             st.warning(f"Data tidak tersedia untuk desa {clicked_desa}.")
-            
         st.caption("ℹ️ *Klik pada area kosong di peta atau klik ulang titik desa untuk menutup profil ini.*")
         
     st.markdown("---")
     col_tabel, col_grafik = st.columns([1, 1])
-    
     with col_tabel:
         st.markdown("#### 📋 Detail Kasus per Desa")
         st.dataframe(df_grouped[["desa", "diagnosa", "jumlah_kasus"]].sort_values(by="jumlah_kasus", ascending=False), use_container_width=True, hide_index=True)
-
     with col_grafik:
         st.markdown("#### 📊 Top Desa Terdampak")
         top_desa_df = df_grouped.groupby("desa")["jumlah_kasus"].sum().reset_index().sort_values("jumlah_kasus", ascending=False).head(10)
@@ -668,13 +647,241 @@ def page_peta_persebaran(df_filtered, filter_info):
 def page_pembiayaan(df_filtered, filter_info):
     st.subheader("💳 Analisis Pembiayaan")
     if df_filtered is None or "pembiayaan" not in df_filtered.columns: return
-    
     df_bayar = df_filtered["pembiayaan"].value_counts().reset_index()
     df_bayar.columns = ["Pembiayaan", "Jumlah"]
     st.bar_chart(df_bayar.set_index("Pembiayaan"))
     st.download_button("📥 Download Data Pembiayaan (Excel)", convert_df_to_excel(df_bayar), "pembiayaan.xlsx")
 
-# ================== HALAMAN ML (PROPHET) ==================
+
+# ================== HELPER: EVALUASI AKURASI PROPHET ==================
+
+def _render_akurasi_badge(mape_avg: float) -> str:
+    """Kembalikan HTML badge sesuai kategori MAPE."""
+    if mape_avg < 10:
+        return f'<span class="akurasi-badge akurasi-hijau">🟢 Sangat Baik — MAPE {mape_avg:.1f}%</span>'
+    elif mape_avg < 20:
+        return f'<span class="akurasi-badge akurasi-kuning">🟡 Cukup Baik — MAPE {mape_avg:.1f}%</span>'
+    elif mape_avg < 30:
+        return f'<span class="akurasi-badge akurasi-oranye">🟠 Perlu Perhatian — MAPE {mape_avg:.1f}%</span>'
+    else:
+        return f'<span class="akurasi-badge akurasi-merah">🔴 Kurang Akurat — MAPE {mape_avg:.1f}%</span>'
+
+
+def section_evaluasi_akurasi(model, df_prophet: pd.DataFrame):
+    """
+    Blok evaluasi akurasi Prophet menggunakan cross-validation bawaan.
+    Dipanggil di dalam page_ml() setelah model.fit().
+    """
+    with st.expander("📐 Evaluasi Akurasi Model Prophet (Cross-Validation)", expanded=False):
+
+        st.markdown(
+            """
+            #### 🎯 Cara Kerja Evaluasi Akurasi
+            Model dievaluasi dengan metode **backtesting / walk-forward validation**:  
+            Data historis dibagi menjadi beberapa *jendela* pelatihan dan pengujian  
+            sehingga kita dapat mengukur seberapa akurat prediksi dibandingkan data aktual yang sudah ada.
+
+            | Metrik | Penjelasan |
+            |--------|-----------|
+            | **MAE** | Rata-rata selisih absolut prediksi vs aktual (satuan: pasien/minggu) |
+            | **RMSE** | Seperti MAE tapi lebih sensitif terhadap error besar |
+            | **MAPE** | Error dalam persen — **makin kecil makin akurat** |
+            | **Coverage** | % data aktual yang jatuh dalam rentang prediksi (idealnya ≈ 80%) |
+            """
+        )
+
+        st.markdown("---")
+
+        # ── Cek panjang data ────────────────────────────────────────────────
+        total_days = (df_prophet["ds"].max() - df_prophet["ds"].min()).days
+
+        if total_days < 60:
+            st.warning(
+                "⚠️ Data terlalu pendek untuk cross-validation (minimal ~60 hari / ~9 minggu). "
+                "Tambahkan rentang data agar evaluasi dapat dijalankan."
+            )
+            return
+
+        # ── Parameter CV dinamis ────────────────────────────────────────────
+        initial_days = max(30, int(total_days * 0.5))
+        period_days  = max(14, int(total_days * 0.15))
+        horizon_days = max(14, int(total_days * 0.25))
+
+        initial_str = f"{initial_days} days"
+        period_str  = f"{period_days} days"
+        horizon_str = f"{horizon_days} days"
+
+        col_param1, col_param2, col_param3 = st.columns(3)
+        col_param1.info(f"⚙️ **Initial (Data Latih Awal)**\n\n{initial_str}")
+        col_param2.info(f"📅 **Period (Frekuensi Evaluasi)**\n\n{period_str}")
+        col_param3.info(f"🔭 **Horizon (Jarak Prediksi)**\n\n{horizon_str}")
+
+        st.caption(
+            "Parameter di atas dihitung otomatis dari panjang data Anda. "
+            "Untuk mengubahnya secara manual, silakan modifikasi kode di fungsi `section_evaluasi_akurasi()`."
+        )
+
+        # ── Jalankan cross-validation ───────────────────────────────────────
+        try:
+            with st.spinner("⏳ Menjalankan cross-validation... (proses ini mungkin memakan 10–30 detik)"):
+                df_cv = cross_validation(
+                    model,
+                    initial=initial_str,
+                    period=period_str,
+                    horizon=horizon_str,
+                    parallel=None,          # hindari masalah multiprocessing di Streamlit
+                )
+                df_pm = performance_metrics(df_cv)
+
+        except Exception as e:
+            st.error(f"❌ Gagal menjalankan cross-validation: {e}")
+            return
+
+        # ── Kalkulasi metrik rata-rata ──────────────────────────────────────
+        mae_avg  = df_pm["mae"].mean()
+        rmse_avg = df_pm["rmse"].mean()
+        mape_avg = df_pm["mape"].mean() * 100   # konversi ke persen
+        cov_avg  = df_pm["coverage"].mean() * 100
+
+        # ── Tampilkan badge & metrik ────────────────────────────────────────
+        st.markdown("#### 📊 Ringkasan Metrik Akurasi")
+        st.markdown(_render_akurasi_badge(mape_avg), unsafe_allow_html=True)
+        st.markdown("")   # spasi
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric(
+            label="MAE",
+            value=f"{mae_avg:.1f}",
+            help="Mean Absolute Error: rata-rata selisih absolut prediksi vs aktual (satuan pasien/minggu). Makin kecil makin baik."
+        )
+        m2.metric(
+            label="RMSE",
+            value=f"{rmse_avg:.1f}",
+            help="Root Mean Squared Error: seperti MAE tetapi lebih sensitif terhadap error besar."
+        )
+        m3.metric(
+            label="MAPE",
+            value=f"{mape_avg:.1f}%",
+            help="Mean Absolute Percentage Error: error dalam persen. < 10% = Sangat Baik, < 20% = Cukup Baik, > 30% = Kurang Akurat."
+        )
+        m4.metric(
+            label="Coverage",
+            value=f"{cov_avg:.1f}%",
+            help="Persentase data aktual yang jatuh di dalam rentang prediksi. Idealnya mendekati 80% (sesuai interval_width model)."
+        )
+
+        # ── Panduan interpretasi ────────────────────────────────────────────
+        st.markdown(
+            """
+            **Panduan baca MAPE:**
+            - 🟢 **< 10%** → Model sangat akurat, cocok digunakan untuk pengambilan keputusan
+            - 🟡 **10–20%** → Cukup baik; wajar untuk data kunjungan puskesmas yang fluktuatif
+            - 🟠 **20–30%** → Perlu dicermati; data mungkin tidak konsisten atau terlalu sedikit
+            - 🔴 **> 30%** → Model kurang andal; pertimbangkan menambah data atau menyesuaikan parameter
+            """
+        )
+
+        st.markdown("---")
+
+        # ── Grafik MAPE vs Horizon ──────────────────────────────────────────
+        st.markdown("#### 📉 Tren Akurasi Berdasarkan Jarak Prediksi (Horizon)")
+        st.caption("Semakin jauh horizon prediksi, umumnya akurasi akan menurun — hal ini adalah perilaku normal model prediksi.")
+
+        df_pm_plot = df_pm.copy()
+        df_pm_plot["horizon_hari"]  = df_pm_plot["horizon"].dt.days
+        df_pm_plot["mape_pct"]      = df_pm_plot["mape"] * 100
+        df_pm_plot["coverage_pct"]  = df_pm_plot["coverage"] * 100
+
+        tab_mape, tab_mae, tab_cov = st.tabs(["MAPE (%)", "MAE & RMSE", "Coverage (%)"])
+
+        with tab_mape:
+            fig_mape = px.line(
+                df_pm_plot, x="horizon_hari", y="mape_pct",
+                markers=True,
+                labels={"horizon_hari": "Horizon (hari)", "mape_pct": "MAPE (%)"},
+                title="MAPE vs Horizon Prediksi"
+            )
+            fig_mape.add_hline(y=10, line_dash="dash", line_color="green",  annotation_text="Batas Sangat Baik (10%)")
+            fig_mape.add_hline(y=20, line_dash="dash", line_color="orange", annotation_text="Batas Cukup Baik (20%)")
+            fig_mape.add_hline(y=30, line_dash="dash", line_color="red",    annotation_text="Batas Kurang Akurat (30%)")
+            fig_mape.update_layout(yaxis_ticksuffix="%", margin=dict(t=40, b=20))
+            st.plotly_chart(fig_mape, use_container_width=True)
+
+        with tab_mae:
+            fig_mae = go.Figure()
+            fig_mae.add_trace(go.Scatter(
+                x=df_pm_plot["horizon_hari"], y=df_pm_plot["mae"],
+                mode="lines+markers", name="MAE", line=dict(color="#2563eb", width=2)
+            ))
+            fig_mae.add_trace(go.Scatter(
+                x=df_pm_plot["horizon_hari"], y=df_pm_plot["rmse"],
+                mode="lines+markers", name="RMSE", line=dict(color="#ef4444", width=2, dash="dash")
+            ))
+            fig_mae.update_layout(
+                title="MAE & RMSE vs Horizon Prediksi",
+                xaxis_title="Horizon (hari)", yaxis_title="Error (pasien/minggu)",
+                hovermode="x unified", margin=dict(t=40, b=20)
+            )
+            st.plotly_chart(fig_mae, use_container_width=True)
+
+        with tab_cov:
+            fig_cov = px.line(
+                df_pm_plot, x="horizon_hari", y="coverage_pct",
+                markers=True,
+                labels={"horizon_hari": "Horizon (hari)", "coverage_pct": "Coverage (%)"},
+                title="Coverage vs Horizon Prediksi"
+            )
+            fig_cov.add_hline(y=80, line_dash="dash", line_color="green", annotation_text="Target Coverage 80%")
+            fig_cov.update_layout(yaxis_ticksuffix="%", margin=dict(t=40, b=20))
+            st.plotly_chart(fig_cov, use_container_width=True)
+
+        # ── Tabel detail ────────────────────────────────────────────────────
+        with st.expander("📋 Tabel Detail Metrik per Horizon"):
+            df_pm_display = df_pm[["horizon", "mae", "rmse", "mape", "coverage"]].copy()
+            df_pm_display["horizon"]  = df_pm_display["horizon"].apply(lambda x: f"{x.days} hari")
+            df_pm_display["mae"]      = df_pm_display["mae"].round(2)
+            df_pm_display["rmse"]     = df_pm_display["rmse"].round(2)
+            df_pm_display["mape"]     = (df_pm_display["mape"] * 100).round(2).astype(str) + "%"
+            df_pm_display["coverage"] = (df_pm_display["coverage"] * 100).round(2).astype(str) + "%"
+            df_pm_display.columns    = ["Horizon", "MAE", "RMSE", "MAPE (%)", "Coverage (%)"]
+            st.dataframe(df_pm_display, use_container_width=True, hide_index=True)
+            st.download_button(
+                label="📥 Download Metrik Akurasi (Excel)",
+                data=convert_df_to_excel(df_pm_display),
+                file_name="evaluasi_akurasi_prophet.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+        # ── Tips peningkatan akurasi ────────────────────────────────────────
+        st.markdown("---")
+        st.markdown("#### 💡 Tips Meningkatkan Akurasi Model")
+        st.markdown(
+            """
+            Jika MAPE terlalu tinggi, coba langkah-langkah berikut:
+            1. **Tambah data historis** — Prophet bekerja optimal dengan minimal 1–2 tahun data
+            2. **Kurangi `changepoint_prior_scale`** (default 0.05) jika model terlalu fleksibel / overfit  
+               → Ganti ke `0.01` atau `0.005`
+            3. **Naikkan `changepoint_prior_scale`** jika model terlalu kaku / underfit  
+               → Ganti ke `0.1` atau `0.5`
+            4. **Aktifkan `weekly_seasonality=True`** jika data Anda per hari (bukan per minggu)
+            5. **Tambahkan holiday** (hari libur nasional) agar model memahami lonjakan/penurunan musiman
+
+            ```python
+            # Contoh konfigurasi yang lebih optimal:
+            model = Prophet(
+                yearly_seasonality  = True,
+                weekly_seasonality  = False,   # ubah True jika data per hari
+                daily_seasonality   = False,
+                changepoint_prior_scale = 0.05,   # coba 0.01–0.5
+                interval_width      = 0.80
+            )
+            ```
+            """
+        )
+
+
+# ================== HALAMAN ML (PROPHET) — VERSI LENGKAP ==================
+
 def page_ml(df_filtered, filter_info):
     st.subheader("📈 Prediksi & Peramalan Tren (Prophet)")
     show_active_filters(filter_info)
@@ -706,12 +913,10 @@ def page_ml(df_filtered, filter_info):
         with col_set1:
             fokus = st.radio("Analisis:", ["Diagnosa Penyakit", "Poli / Unit"], horizontal=True)
             kolom_fokus = "diagnosa" if fokus == "Diagnosa Penyakit" else "poli"
-        
         with col_set2:
             if kolom_fokus not in df_ml.columns: return
             top_items = df_ml[kolom_fokus].value_counts().head(30)
             pilihan_item = st.selectbox(f"Pilih {fokus}:", options=top_items.index.tolist())
-            
         with col_set3:
             target_date = st.date_input(
                 "Prediksi Sampai Tanggal:", 
@@ -733,18 +938,25 @@ def page_ml(df_filtered, filter_info):
         st.markdown(f"Untuk memprediksi tren **{pilihan_item}**, AI Prophet membaca tabel rekapitulasi data per minggu di bawah ini sebagai bahan pembelajarannya:")
         st.dataframe(df_prophet.rename(columns={"ds": "Periode (Minggu)", "y": "Jumlah Pasien"}), use_container_width=True)
 
+    # ── Training model ──────────────────────────────────────────────────────
     with st.spinner('AI Prophet sedang memproses pola peramalan...'):
-        model = Prophet(yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False, interval_width=0.80)
+        model = Prophet(
+            yearly_seasonality=True,
+            weekly_seasonality=False,
+            daily_seasonality=False,
+            interval_width=0.80
+        )
         model.fit(df_prophet)
 
-        last_date = df_prophet["ds"].max().date()
-        target_dt = pd.to_datetime(target_date).date()
-        delta_days = (target_dt - last_date).days
+        last_date    = df_prophet["ds"].max().date()
+        target_dt    = pd.to_datetime(target_date).date()
+        delta_days   = (target_dt - last_date).days
         periods_ahead = max(1, delta_days // 7)
 
-        future = model.make_future_dataframe(periods=periods_ahead, freq='W-MON')
+        future   = model.make_future_dataframe(periods=periods_ahead, freq='W-MON')
         forecast = model.predict(future)
 
+    # ── Grafik prediksi ─────────────────────────────────────────────────────
     st.markdown(f"### 📈 Grafik Peramalan: **{pilihan_item}**")
     fig = go.Figure()
 
@@ -760,7 +972,6 @@ def page_ml(df_filtered, filter_info):
         mode='lines+markers', name='Prediksi Masa Depan',
         line=dict(color='#ef4444', width=3, dash='dash')
     ))
-
     fig.add_trace(go.Scatter(
         x=forecast_future['ds'].tolist() + forecast_future['ds'].tolist()[::-1],
         y=forecast_future['yhat_upper'].tolist() + forecast_future['yhat_lower'].tolist()[::-1],
@@ -769,7 +980,6 @@ def page_ml(df_filtered, filter_info):
         name='Rentang Toleransi',
         hoverinfo="skip"
     ))
-
     fig.update_layout(
         xaxis_title="Periode Waktu", yaxis_title="Jumlah Kunjungan/Pasien",
         hovermode="x unified", margin=dict(l=0, r=0, t=30, b=0),
@@ -786,16 +996,15 @@ def page_ml(df_filtered, filter_info):
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
+    # ── Kesimpulan estimasi ─────────────────────────────────────────────────
     st.markdown(f"### 📢 Kesimpulan Estimasi Hingga {pd.to_datetime(target_date).strftime('%d %B %Y')}")
     if not forecast_future.empty:
-        total_estimasi = int(round(forecast_future["yhat"].clip(lower=0).sum()))
-        
-        target_week = forecast_future.iloc[-1]
-        tgl_target_akhir = target_week["ds"].strftime("%d %B %Y")
-        
+        total_estimasi      = int(round(forecast_future["yhat"].clip(lower=0).sum()))
+        target_week         = forecast_future.iloc[-1]
+        tgl_target_akhir    = target_week["ds"].strftime("%d %B %Y")
         est_kunjungan_akhir = max(0, int(round(target_week["yhat"])))
-        batas_bawah_akhir = max(0, int(round(target_week["yhat_lower"])))
-        batas_atas_akhir = max(0, int(round(target_week["yhat_upper"])))
+        batas_bawah_akhir   = max(0, int(round(target_week["yhat_lower"])))
+        batas_atas_akhir    = max(0, int(round(target_week["yhat_upper"])))
 
         col_alert, col_metric1, col_metric2 = st.columns([2, 1, 1])
         with col_alert:
@@ -807,13 +1016,20 @@ def page_ml(df_filtered, filter_info):
                     </div>
                 </div>
             """, unsafe_allow_html=True)
-            
         with col_metric1:
             st.metric("Total Akumulasi Pasien", f"{total_estimasi} Pasien")
         with col_metric2:
-            st.metric("Estimasi Pekan Terakhir", f"{est_kunjungan_akhir} Pasien", help=f"Batas Bawah: {batas_bawah_akhir} | Batas Atas: {batas_atas_akhir}")
+            st.metric("Estimasi Pekan Terakhir", f"{est_kunjungan_akhir} Pasien",
+                      help=f"Batas Bawah: {batas_bawah_akhir} | Batas Atas: {batas_atas_akhir}")
     else:
         st.info("Tanggal prediksi terlalu dekat dengan data terakhir.")
+
+    # ── ★ EVALUASI AKURASI (BAGIAN BARU) ──────────────────────────────────
+    st.markdown("---")
+    section_evaluasi_akurasi(model, df_prophet)
+
+
+# ================== HALAMAN LAIN ==================
 
 def page_data(df_filtered, filter_info):
     st.subheader("📄 Data & Unduhan")
@@ -828,7 +1044,6 @@ def page_quality(df):
     st.write("Missing Values:")
     st.dataframe(df.isna().sum().to_frame("Missing Count"))
 
-# ================== HALAMAN Agent AI ==================
 def page_ai_assistant(df_filtered, filter_info, is_genai_configured):
     st.subheader("🤖 Agent AI Cerdas")
     
@@ -852,7 +1067,7 @@ def page_ai_assistant(df_filtered, filter_info, is_genai_configured):
         top_poli = ", ".join([f"{k} ({v} kunjungan)" for k, v in top_poli_series.items()])
         
     gender = df_filtered['jenis_kelamin'].mode()[0] if 'jenis_kelamin' in df_filtered.columns and not df_filtered['jenis_kelamin'].dropna().empty else "-"
-    umur = df_filtered['kelompok_umur'].mode()[0] if 'kelompok_umur' in df_filtered.columns and not df_filtered['kelompok_umur'].dropna().empty else "-"
+    umur   = df_filtered['kelompok_umur'].mode()[0] if 'kelompok_umur' in df_filtered.columns and not df_filtered['kelompok_umur'].dropna().empty else "-"
     
     desa = "-"
     if "desa" in df_filtered.columns:
@@ -891,16 +1106,14 @@ def page_ai_assistant(df_filtered, filter_info, is_genai_configured):
         
         with st.spinner("🤖 AI sedang menganalisis data dan merumuskan jawaban..."):
             try:
-                model = genai.GenerativeModel('gemini-2.5-flash') 
-                response = model.generate_content(prompt)
-                
+                model_ai = genai.GenerativeModel('gemini-2.5-flash')
+                response = model_ai.generate_content(prompt)
                 st.markdown("### 📊 Analisis AI:")
                 st.markdown(f"""
                 <div style="padding: 1.5rem; border-radius: 0.5rem; background-color: var(--secondary-background-color); border: 1px solid rgba(148, 163, 184, 0.4);">
                     {response.text}
                 </div>
                 """, unsafe_allow_html=True)
-
             except Exception as e:
                 error_msg = str(e)
                 if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
@@ -908,7 +1121,6 @@ def page_ai_assistant(df_filtered, filter_info, is_genai_configured):
                 else:
                     st.error(f"❌ Gagal terhubung ke server AI. Detail: {error_msg}")
 
-# ================== HALAMAN CETAK LAPORAN PDF ==================
 def page_cetak_laporan(df_filtered, filter_info):
     st.subheader("🖨️ Cetak Laporan PDF (Lengkap dengan Grafik)")
     show_active_filters(filter_info)
@@ -923,18 +1135,15 @@ def page_cetak_laporan(df_filtered, filter_info):
         with st.spinner("Menyusun laporan dan merender grafik..."):
             try:
                 total_kunjungan = len(df_filtered)
-                
                 top_diagnosa = []
                 if "diagnosa" in df_filtered.columns:
                     top_diagnosa = df_filtered["diagnosa"].value_counts().head(5).items()
-                    
                 top_poli = []
                 if "poli" in df_filtered.columns:
                     top_poli = df_filtered["poli"].value_counts().head(5).items()
 
                 pdf = FPDF()
                 pdf.add_page()
-                
                 pdf.set_font("Arial", 'B', 16)
                 pdf.cell(0, 8, "LAPORAN RINGKASAN KUNJUNGAN PASIEN", ln=True, align='C')
                 pdf.set_font("Arial", 'B', 14)
@@ -993,11 +1202,10 @@ def page_cetak_laporan(df_filtered, filter_info):
                     top10_df = df_filtered["diagnosa"].value_counts().head(10).reset_index()
                     top10_df.columns = ['Diagnosa', 'Jumlah']
                     fig_diag = px.bar(top10_df, x='Diagnosa', y='Jumlah', title="Top 10 Diagnosa Penyakit", text_auto=True)
-                    
                     fd, path_diag = tempfile.mkstemp(suffix=".png")
+                    os.close(fd)
                     fig_diag.write_image(path_diag, engine="kaleido", width=800, height=500)
                     temp_images.append(path_diag)
-
                     pdf.set_font("Arial", 'B', 12)
                     pdf.cell(0, 8, "A. Grafik Distribusi Penyakit", ln=True)
                     pdf.image(path_diag, x=15, w=180)
@@ -1008,11 +1216,10 @@ def page_cetak_laporan(df_filtered, filter_info):
                     if not trend.empty:
                         trend["Periode"] = trend["nama_bulan"].astype(str) + " " + trend["tahun"].astype(str)
                         fig_trend = px.line(trend, x="Periode", y="count", title="Tren Kunjungan Pasien Berdasarkan Bulan", markers=True)
-                        
                         fd, path_trend = tempfile.mkstemp(suffix=".png")
+                        os.close(fd)
                         fig_trend.write_image(path_trend, engine="kaleido", width=800, height=400)
                         temp_images.append(path_trend)
-
                         pdf.set_font("Arial", 'B', 12)
                         pdf.cell(0, 8, "B. Tren Kunjungan Bulanan", ln=True)
                         pdf.image(path_trend, x=15, w=180)
@@ -1028,7 +1235,6 @@ def page_cetak_laporan(df_filtered, filter_info):
                         os.remove(img_path)
 
                 st.success("✅ Laporan PDF beserta grafik berhasil dibuat!")
-                
                 st.download_button(
                     label="📥 Download Laporan PDF (Teks & Grafik)",
                     data=pdf_bytes,
@@ -1040,11 +1246,11 @@ def page_cetak_laporan(df_filtered, filter_info):
             except Exception as e:
                 st.error(f"❌ Terjadi kesalahan saat memproses grafik. Pastikan Anda sudah menambahkan 'kaleido' di requirements.txt. Detail error: {e}")
 
+
 # ========= MAIN =========
 
 def main():
     df_filtered, filter_info = apply_filters(None)
-    
     is_genai_configured = get_gemini_client()
 
     st.sidebar.markdown("---")
@@ -1054,16 +1260,16 @@ def main():
         "Kualitas Data", "Prediksi ML", "Agent AI", "Cetak Laporan PDF"
     ])
     
-    if page == "Ringkasan Umum": page_overview(df_filtered, filter_info)
-    elif page == "Analisis Kunjungan": page_kunjungan(df_filtered, filter_info)
-    elif page == "Analisis Penyakit": page_penyakit(df_filtered, filter_info)
-    elif page == "Peta Persebaran": page_peta_persebaran(df_filtered, filter_info)
+    if page == "Ringkasan Umum":      page_overview(df_filtered, filter_info)
+    elif page == "Analisis Kunjungan":  page_kunjungan(df_filtered, filter_info)
+    elif page == "Analisis Penyakit":   page_penyakit(df_filtered, filter_info)
+    elif page == "Peta Persebaran":     page_peta_persebaran(df_filtered, filter_info)
     elif page == "Analisis Pembiayaan": page_pembiayaan(df_filtered, filter_info)
-    elif page == "Data & Unduhan": page_data(df_filtered, filter_info)
-    elif page == "Kualitas Data": page_quality(df_filtered)
-    elif page == "Prediksi ML": page_ml(df_filtered, filter_info)
-    elif page == "Agent AI": page_ai_assistant(df_filtered, filter_info, is_genai_configured)
-    elif page == "Cetak Laporan PDF": page_cetak_laporan(df_filtered, filter_info)
+    elif page == "Data & Unduhan":      page_data(df_filtered, filter_info)
+    elif page == "Kualitas Data":       page_quality(df_filtered)
+    elif page == "Prediksi ML":         page_ml(df_filtered, filter_info)
+    elif page == "Agent AI":            page_ai_assistant(df_filtered, filter_info, is_genai_configured)
+    elif page == "Cetak Laporan PDF":   page_cetak_laporan(df_filtered, filter_info)
 
 if __name__ == "__main__":
     main()

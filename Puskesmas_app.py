@@ -1040,6 +1040,325 @@ def page_cetak_laporan(df_filtered, filter_info):
             except Exception as e:
                 st.error(f"❌ Terjadi kesalahan saat memproses grafik. Pastikan Anda sudah menambahkan 'kaleido' di requirements.txt. Detail error: {e}")
 
+# ================== HALAMAN EVALUASI AKURASI MODEL ==================
+
+def _hitung_metrik(y_actual, y_pred):
+    """Menghitung MAE, RMSE, MAPE, dan R² antara nilai aktual vs prediksi."""
+    y_actual = np.array(y_actual, dtype=float)
+    y_pred   = np.array(y_pred,   dtype=float)
+
+    mae  = float(np.mean(np.abs(y_actual - y_pred)))
+    rmse = float(np.sqrt(np.mean((y_actual - y_pred) ** 2)))
+
+    mask = y_actual != 0
+    mape = float(np.mean(np.abs((y_actual[mask] - y_pred[mask]) / y_actual[mask])) * 100) if mask.any() else float("nan")
+
+    ss_res = float(np.sum((y_actual - y_pred) ** 2))
+    ss_tot = float(np.sum((y_actual - np.mean(y_actual)) ** 2))
+    r2 = 1 - ss_res / ss_tot if ss_tot != 0 else float("nan")
+
+    return {"MAE": mae, "RMSE": rmse, "MAPE (%)": mape, "R²": r2}
+
+
+def _interpretasi_akurasi(mape, r2):
+    """Mengembalikan (label_kualitas, warna_badge) berdasarkan MAPE & R²."""
+    if mape <= 10 and r2 >= 0.85:
+        return "🟢 Sangat Baik", "#16a34a"
+    elif mape <= 20 and r2 >= 0.70:
+        return "🟡 Cukup Baik", "#ca8a04"
+    elif mape <= 30:
+        return "🟠 Perlu Perhatian", "#ea580c"
+    else:
+        return "🔴 Kurang Akurat", "#dc2626"
+
+
+def page_evaluasi_akurasi(df_filtered, filter_info):
+    """
+    Halaman evaluasi akurasi model Prophet menggunakan teknik
+    Train/Test Split (Holdout Validation).
+    - 80% data lama → training
+    - 20% data terbaru → testing (dibandingkan dengan prediksi)
+    - Metrik: MAE, RMSE, MAPE, R²
+    """
+    st.subheader("📐 Evaluasi Akurasi Model Prediksi (Prophet)")
+
+    with st.expander("ℹ️ Apa itu Evaluasi Akurasi Model & Cara Kerjanya?", expanded=False):
+        st.markdown("""
+        **Mengapa perlu evaluasi?**
+        Model Prophet menghasilkan prediksi, tetapi kita perlu tahu *seberapa jauh* prediksi itu
+        meleset dari data nyata. Itulah gunanya evaluasi akurasi.
+
+        **Metode: Holdout Validation (Train/Test Split)**
+        | Tahap | Penjelasan |
+        |---|---|
+        | **Training Set (80%)** | Data lama yang digunakan AI untuk "belajar" pola |
+        | **Test Set (20%)** | Data terbaru yang *disembunyikan* dari AI, lalu dipakai untuk menguji |
+
+        **Metrik yang digunakan:**
+        | Metrik | Arti | Target Ideal |
+        |---|---|---|
+        | **MAE** | Rata-rata selisih absolut prediksi vs aktual (satuan: pasien) | Sekecil mungkin |
+        | **RMSE** | Seperti MAE, tapi lebih sensitif terhadap kesalahan besar | Sekecil mungkin |
+        | **MAPE (%)** | Rata-rata persentase kesalahan prediksi | < 10% = Sangat Baik |
+        | **R²** | Seberapa baik model menjelaskan variasi data (0–1) | > 0.85 = Sangat Baik |
+
+        > 💡 **Contoh:** MAPE 8% berarti rata-rata prediksi meleset 8% dari angka aktual.
+        > Untuk konteks puskesmas, MAPE di bawah 20% sudah sangat layak digunakan sebagai
+        > dasar perencanaan logistik dan anggaran.
+        """)
+
+    if df_filtered is None or df_filtered.empty:
+        st.warning("⚠️ Data belum tersedia. Silakan upload file terlebih dahulu.")
+        return
+
+    if "tanggal_kunjungan" not in df_filtered.columns:
+        st.error("❌ Kolom 'tanggal_kunjungan' tidak ditemukan.")
+        return
+
+    df_ml = df_filtered.copy()
+    if not pd.api.types.is_datetime64_any_dtype(df_ml["tanggal_kunjungan"]):
+        df_ml["tanggal_kunjungan"] = pd.to_datetime(df_ml["tanggal_kunjungan"], errors="coerce")
+    df_ml = df_ml.dropna(subset=["tanggal_kunjungan"])
+
+    if len(df_ml) < 30:
+        st.warning("⚠️ Data terlalu sedikit (minimal 30 baris) untuk evaluasi yang bermakna.")
+        return
+
+    st.markdown("---")
+
+    col_a, col_b, col_c = st.columns([2, 2, 1])
+    with col_a:
+        fokus_eval = st.radio("Analisis berdasarkan:", ["Diagnosa Penyakit", "Poli / Unit"], horizontal=True, key="eval_fokus")
+        kolom_fokus_eval = "diagnosa" if fokus_eval == "Diagnosa Penyakit" else "poli"
+    with col_b:
+        if kolom_fokus_eval not in df_ml.columns:
+            st.error(f"❌ Kolom '{kolom_fokus_eval}' tidak ditemukan dalam data.")
+            return
+        top_items_eval = df_ml[kolom_fokus_eval].value_counts().head(20)
+        pilihan_item_eval = st.selectbox(f"Pilih {fokus_eval}:", options=top_items_eval.index.tolist(), key="eval_item")
+    with col_c:
+        test_pct = st.slider("Proporsi Data Uji (%)", min_value=10, max_value=40, value=20, step=5, key="eval_split",
+                             help="Persentase data terbaru yang digunakan sebagai data uji.")
+
+    df_item_eval = df_ml[df_ml[kolom_fokus_eval] == pilihan_item_eval].copy()
+
+    if len(df_item_eval) < 20:
+        st.error(f"❌ Data untuk '{pilihan_item_eval}' terlalu sedikit (< 20 baris). Coba pilih diagnosa/poli lain.")
+        return
+
+    weekly_eval = (
+        df_item_eval
+        .groupby(pd.Grouper(key="tanggal_kunjungan", freq="W-MON"))
+        .size()
+        .reset_index(name="jumlah")
+    )
+    df_prophet_eval = weekly_eval.rename(columns={"tanggal_kunjungan": "ds", "jumlah": "y"})
+    df_prophet_eval = df_prophet_eval[df_prophet_eval["y"] > 0].reset_index(drop=True)
+
+    if len(df_prophet_eval) < 15:
+        st.error(f"❌ Data mingguan untuk '{pilihan_item_eval}' terlalu sedikit ({len(df_prophet_eval)} minggu). Minimal 15 minggu.")
+        return
+
+    n_total  = len(df_prophet_eval)
+    n_test   = max(4, int(n_total * test_pct / 100))
+    n_train  = n_total - n_test
+
+    df_train_eval = df_prophet_eval.iloc[:n_train].copy()
+    df_test_eval  = df_prophet_eval.iloc[n_train:].copy()
+
+    col_i1, col_i2, col_i3 = st.columns(3)
+    col_i1.metric("Total Minggu Data", f"{n_total} minggu")
+    col_i2.metric("Training Set", f"{n_train} minggu", delta=f"{100 - test_pct}% dari data")
+    col_i3.metric("Test Set", f"{n_test} minggu", delta=f"{test_pct}% dari data")
+
+    st.markdown(f"""
+    > **Garis batas split:** Training hingga **{df_train_eval['ds'].max().strftime('%d %b %Y')}**  
+    > Testing dari **{df_test_eval['ds'].min().strftime('%d %b %Y')}** sampai **{df_test_eval['ds'].max().strftime('%d %b %Y')}**
+    """)
+
+    with st.spinner(f"🔄 Model sedang belajar dari {n_train} minggu data training..."):
+        model_eval = Prophet(
+            yearly_seasonality=True,
+            weekly_seasonality=False,
+            daily_seasonality=False,
+            interval_width=0.80
+        )
+        model_eval.fit(df_train_eval)
+
+        future_eval = model_eval.make_future_dataframe(periods=n_test, freq="W-MON")
+        forecast_eval_full = model_eval.predict(future_eval)
+        forecast_test_eval = forecast_eval_full[forecast_eval_full["ds"].isin(df_test_eval["ds"])].copy()
+
+    if forecast_test_eval.empty:
+        st.error("❌ Prediksi gagal dihasilkan. Coba kurangi proporsi data uji.")
+        return
+
+    df_eval = pd.merge(
+        df_test_eval[["ds", "y"]].rename(columns={"y": "Aktual"}),
+        forecast_test_eval[["ds", "yhat", "yhat_lower", "yhat_upper"]].rename(
+            columns={"yhat": "Prediksi", "yhat_lower": "Batas_Bawah", "yhat_upper": "Batas_Atas"}
+        ),
+        on="ds", how="inner"
+    )
+    df_eval["Prediksi"]    = df_eval["Prediksi"].clip(lower=0).round(1)
+    df_eval["Batas_Bawah"] = df_eval["Batas_Bawah"].clip(lower=0).round(1)
+    df_eval["Batas_Atas"]  = df_eval["Batas_Atas"].clip(lower=0).round(1)
+    df_eval["Selisih"]     = (df_eval["Prediksi"] - df_eval["Aktual"]).round(1)
+    df_eval["Error (%)"]   = np.where(
+        df_eval["Aktual"] != 0,
+        ((df_eval["Prediksi"] - df_eval["Aktual"]).abs() / df_eval["Aktual"] * 100).round(1),
+        np.nan
+    )
+
+    metrik = _hitung_metrik(df_eval["Aktual"].values, df_eval["Prediksi"].values)
+    label_kualitas, warna_badge = _interpretasi_akurasi(metrik["MAPE (%)"], metrik["R²"])
+
+    st.markdown("---")
+    st.markdown(f"### 📊 Hasil Evaluasi Model — **{pilihan_item_eval}**")
+
+    st.markdown(f"""
+    <div style="display:inline-block; padding: 0.4rem 1.2rem; border-radius: 999px;
+         background-color: {warna_badge}22; border: 2px solid {warna_badge};
+         color: {warna_badge}; font-weight: 700; font-size: 1.05rem; margin-bottom: 1rem;">
+        Kualitas Model: {label_kualitas}
+    </div>
+    """, unsafe_allow_html=True)
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("MAE",  f"{metrik['MAE']:.2f} pasien",
+              help="Mean Absolute Error: rata-rata selisih absolut prediksi vs aktual")
+    m2.metric("RMSE", f"{metrik['RMSE']:.2f} pasien",
+              help="Root Mean Square Error: lebih sensitif terhadap kesalahan besar")
+    m3.metric("MAPE", f"{metrik['MAPE (%)']:.1f}%",
+              delta="< 10% = Sangat Baik" if metrik["MAPE (%)"] <= 10 else "Target < 10%",
+              delta_color="normal" if metrik["MAPE (%)"] <= 10 else "inverse",
+              help="Mean Absolute Percentage Error: rata-rata persentase kesalahan")
+    m4.metric("R²",   f"{metrik['R²']:.3f}",
+              delta="≥ 0.85 = Sangat Baik" if metrik["R²"] >= 0.85 else "Target ≥ 0.85",
+              delta_color="normal" if metrik["R²"] >= 0.85 else "inverse",
+              help="Koefisien determinasi: seberapa baik model menjelaskan variasi data")
+
+    st.markdown("---")
+    st.markdown("#### 📈 Grafik Aktual vs Prediksi (Periode Test)")
+
+    fig_eval = go.Figure()
+    fig_eval.add_trace(go.Scatter(
+        x=df_eval["ds"].tolist() + df_eval["ds"].tolist()[::-1],
+        y=df_eval["Batas_Atas"].tolist() + df_eval["Batas_Bawah"].tolist()[::-1],
+        fill="toself", fillcolor="rgba(239, 68, 68, 0.12)",
+        line=dict(color="rgba(255,255,255,0)"),
+        name="Rentang Kepercayaan 80%", hoverinfo="skip",
+    ))
+    fig_eval.add_trace(go.Scatter(
+        x=df_eval["ds"], y=df_eval["Aktual"],
+        mode="lines+markers", name="Data Aktual (Nyata)",
+        line=dict(color="#2563eb", width=2.5), marker=dict(size=7),
+    ))
+    fig_eval.add_trace(go.Scatter(
+        x=df_eval["ds"], y=df_eval["Prediksi"],
+        mode="lines+markers", name="Prediksi Model",
+        line=dict(color="#ef4444", width=2.5, dash="dash"),
+        marker=dict(size=7, symbol="diamond"),
+    ))
+    fig_eval.update_layout(
+        xaxis_title="Periode (Minggu)", yaxis_title="Jumlah Kunjungan",
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        margin=dict(l=0, r=0, t=10, b=0), height=380,
+    )
+    st.plotly_chart(fig_eval, use_container_width=True)
+
+    st.markdown("#### 📉 Grafik Residual (Selisih Prediksi vs Aktual)")
+    st.caption("Garis mendekati nol artinya prediksi makin akurat. Pola sistematis menunjukkan model masih bisa diperbaiki.")
+
+    colors_bar = ["#16a34a" if v >= 0 else "#dc2626" for v in df_eval["Selisih"]]
+    fig_resid = go.Figure()
+    fig_resid.add_trace(go.Bar(
+        x=df_eval["ds"], y=df_eval["Selisih"],
+        marker_color=colors_bar, name="Selisih (Prediksi − Aktual)",
+        hovertemplate="<b>%{x}</b><br>Selisih: %{y:.1f} pasien<extra></extra>",
+    ))
+    fig_resid.add_hline(y=0, line_dash="dash", line_color="gray", line_width=1.5)
+    fig_resid.update_layout(
+        xaxis_title="Periode (Minggu)", yaxis_title="Selisih (pasien)",
+        height=280, margin=dict(l=0, r=0, t=10, b=0),
+    )
+    st.plotly_chart(fig_resid, use_container_width=True)
+
+    with st.expander("📋 Lihat Tabel Detail Aktual vs Prediksi", expanded=False):
+        df_tampil = df_eval.copy()
+        df_tampil["ds"] = df_tampil["ds"].dt.strftime("%d %b %Y")
+        df_tampil.columns = ["Minggu", "Aktual", "Prediksi", "Batas Bawah", "Batas Atas", "Selisih", "Error (%)"]
+        st.dataframe(df_tampil, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+    st.markdown("#### 💡 Interpretasi & Rekomendasi")
+
+    mape_val = metrik["MAPE (%)"]
+    r2_val   = metrik["R²"]
+    mae_val  = metrik["MAE"]
+
+    if mape_val <= 10 and r2_val >= 0.85:
+        rekomendasi = f"""
+        ✅ **Model memiliki akurasi tinggi** (MAPE {mape_val:.1f}%, R² {r2_val:.3f}).<br><br>
+        - Prediksi ini <b>layak dijadikan dasar perencanaan</b> logistik obat dan anggaran.<br>
+        - Rata-rata kesalahan prediksi hanya <b>{mae_val:.1f} pasien/minggu</b> — sangat kecil.<br>
+        - Model dapat digunakan langsung di halaman <b>Prediksi ML</b>.
+        """
+    elif mape_val <= 20 and r2_val >= 0.70:
+        rekomendasi = f"""
+        ⚠️ <b>Model memiliki akurasi cukup baik</b> (MAPE {mape_val:.1f}%, R² {r2_val:.3f}).<br><br>
+        - Prediksi masih <b>dapat digunakan sebagai gambaran umum</b>, namun tambahkan buffer ±{mae_val:.0f} pasien/minggu.<br>
+        - Pertimbangkan untuk <b>menambah data historis</b> (minimal 1 tahun) agar model lebih mengenal pola musiman.<br>
+        - Coba filter data pada poli/diagnosa spesifik untuk meningkatkan akurasi.
+        """
+    elif mape_val <= 30:
+        rekomendasi = f"""
+        🔶 <b>Model perlu perbaikan</b> (MAPE {mape_val:.1f}%, R² {r2_val:.3f}).<br><br>
+        - Gunakan prediksi ini <b>hanya sebagai referensi kasar</b>, bukan dasar pengambilan keputusan utama.<br>
+        - <b>Saran:</b> tambahkan data historis lebih panjang, atau coba analisis pada diagnosa/poli dengan kasus lebih banyak.
+        """
+    else:
+        rekomendasi = f"""
+        ❌ <b>Model kurang akurat</b> (MAPE {mape_val:.1f}%, R² {r2_val:.3f}).<br><br>
+        - <b>Jangan gunakan</b> hasil prediksi ini untuk keputusan penting.<br>
+        - Kemungkinan penyebab: data sangat sedikit, pola tidak beraturan, atau banyak nilai ekstrem.<br>
+        - <b>Saran:</b> pilih diagnosa/poli dengan kunjungan lebih tinggi dan data lebih konsisten.
+        """
+
+    st.markdown(f"""
+    <div style="padding: 1rem 1.5rem; border-radius: 0.5rem;
+         background-color: rgba(59, 130, 246, 0.07);
+         border-left: 4px solid {warna_badge};">
+        {rekomendasi}
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("---")
+    df_download_eval = df_eval.copy()
+    df_download_eval["ds"] = df_download_eval["ds"].dt.strftime("%Y-%m-%d")
+    df_download_eval.columns = ["Tanggal", "Aktual", "Prediksi", "Batas_Bawah", "Batas_Atas", "Selisih", "Error_Persen"]
+
+    df_metrik_eval = pd.DataFrame([{
+        "Metrik": k,
+        "Nilai": round(v, 4),
+        "Satuan": "pasien" if k in ["MAE", "RMSE"] else ("%" if "%" in k else "")
+    } for k, v in metrik.items()])
+
+    output_eval = io.BytesIO()
+    with pd.ExcelWriter(output_eval, engine="openpyxl") as writer:
+        df_download_eval.to_excel(writer, index=False, sheet_name="Aktual_vs_Prediksi")
+        df_metrik_eval.to_excel(writer, index=False, sheet_name="Metrik_Akurasi")
+    output_eval.seek(0)
+
+    st.download_button(
+        label="📥 Download Laporan Evaluasi (Excel)",
+        data=output_eval.getvalue(),
+        file_name=f"evaluasi_akurasi_{pilihan_item_eval.replace(' ', '_')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
 # ========= MAIN =========
 
 def main():
@@ -1051,7 +1370,8 @@ def main():
     page = st.sidebar.radio("Navigasi", [
         "Ringkasan Umum", "Analisis Kunjungan", "Analisis Penyakit", 
         "Peta Persebaran", "Analisis Pembiayaan", "Data & Unduhan", 
-        "Kualitas Data", "Prediksi ML", "Agent AI", "Cetak Laporan PDF"
+        "Kualitas Data", "Prediksi ML", "📐 Evaluasi Akurasi Model",
+        "Agent AI", "Cetak Laporan PDF"
     ])
     
     if page == "Ringkasan Umum": page_overview(df_filtered, filter_info)
@@ -1062,6 +1382,7 @@ def main():
     elif page == "Data & Unduhan": page_data(df_filtered, filter_info)
     elif page == "Kualitas Data": page_quality(df_filtered)
     elif page == "Prediksi ML": page_ml(df_filtered, filter_info)
+    elif page == "📐 Evaluasi Akurasi Model": page_evaluasi_akurasi(df_filtered, filter_info)
     elif page == "Agent AI": page_ai_assistant(df_filtered, filter_info, is_genai_configured)
     elif page == "Cetak Laporan PDF": page_cetak_laporan(df_filtered, filter_info)
 

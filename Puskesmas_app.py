@@ -674,9 +674,141 @@ def page_pembiayaan(df_filtered, filter_info):
     st.bar_chart(df_bayar.set_index("Pembiayaan"))
     st.download_button("📥 Download Data Pembiayaan (Excel)", convert_df_to_excel(df_bayar), "pembiayaan.xlsx")
 
-# ================== HALAMAN ML (PROPHET) ==================
+# ================== HELPER: DETEKSI & TAMBAH HARI LIBUR NASIONAL ==================
+def _get_hari_libur_indonesia(tahun_list):
+    """
+    Menghasilkan DataFrame hari libur nasional Indonesia yang relevan
+    untuk dimasukkan sebagai regressor ke Prophet.
+    Hari libur diketahui mempengaruhi pola kunjungan puskesmas secara signifikan.
+    """
+    libur = []
+    for tahun in tahun_list:
+        libur += [
+            {"holiday": "tahun_baru",        "ds": f"{tahun}-01-01", "lower_window": 0, "upper_window": 1},
+            {"holiday": "isra_miraj",         "ds": f"{tahun}-01-27", "lower_window": 0, "upper_window": 0},
+            {"holiday": "imlek",              "ds": f"{tahun}-01-29", "lower_window": 0, "upper_window": 0},
+            {"holiday": "hari_raya_nyepi",    "ds": f"{tahun}-03-20", "lower_window": 0, "upper_window": 0},
+            {"holiday": "wafat_yesus",        "ds": f"{tahun}-04-18", "lower_window": 0, "upper_window": 0},
+            {"holiday": "hari_buruh",         "ds": f"{tahun}-05-01", "lower_window": 0, "upper_window": 0},
+            {"holiday": "kenaikan_yesus",     "ds": f"{tahun}-05-29", "lower_window": 0, "upper_window": 0},
+            {"holiday": "hari_lahir_pancasila","ds": f"{tahun}-06-01", "lower_window": 0, "upper_window": 0},
+            {"holiday": "idul_adha",          "ds": f"{tahun}-06-07", "lower_window": -1,"upper_window": 1},
+            {"holiday": "tahun_baru_islam",   "ds": f"{tahun}-06-27", "lower_window": 0, "upper_window": 0},
+            {"holiday": "hut_ri",             "ds": f"{tahun}-08-17", "lower_window": 0, "upper_window": 0},
+            {"holiday": "maulid_nabi",        "ds": f"{tahun}-09-05", "lower_window": 0, "upper_window": 0},
+            {"holiday": "natal",              "ds": f"{tahun}-12-25", "lower_window": -1,"upper_window": 1},
+            # Lebaran: biasanya libur panjang, kunjungan turun drastis
+            {"holiday": "idul_fitri",         "ds": f"{tahun}-04-10", "lower_window": -3,"upper_window": 3},
+        ]
+    df_libur = pd.DataFrame(libur)
+    df_libur["ds"] = pd.to_datetime(df_libur["ds"])
+    return df_libur
+
+
+def _deteksi_outlier_iqr(series: pd.Series, factor: float = 1.5) -> pd.Series:
+    """
+    Mendeteksi outlier menggunakan metode IQR dan menggantinya dengan
+    nilai median rolling 4 minggu. Outlier ekstrem (lonjakan/drop tiba-tiba)
+    bisa membuat model Prophet 'bingung' dan tidak akurat.
+    """
+    q1, q3 = series.quantile(0.25), series.quantile(0.75)
+    iqr = q3 - q1
+    lower, upper = q1 - factor * iqr, q3 + factor * iqr
+    median_rolling = series.rolling(window=4, min_periods=1, center=True).median()
+    cleaned = series.copy()
+    mask = (series < lower) | (series > upper)
+    cleaned[mask] = median_rolling[mask]
+    return cleaned.clip(lower=0)
+
+
+def _bangun_model_prophet(df_prophet: pd.DataFrame, n_minggu: int,
+                           use_monthly: bool, use_outlier_cap: bool,
+                           use_libur: bool, changepoint_scale: float,
+                           seasonality_scale: float) -> tuple:
+    """
+    Membangun dan melatih model Prophet dengan semua peningkatan kualitas:
+    1. Deteksi & koreksi outlier (IQR)
+    2. Transformasi log untuk stabilisasi variansi
+    3. Seasonality bulanan kustom
+    4. Hari libur nasional Indonesia
+    5. Tuning changepoint & seasonality prior scale
+    6. Floor & cap (logistic growth jika variance tinggi)
+    Mengembalikan (model, forecast, df_train_final)
+    """
+    df = df_prophet.copy()
+
+    # ── 1. Isi minggu yang kosong (zero-fill) ──────────────────────────────
+    full_range = pd.date_range(start=df["ds"].min(), end=df["ds"].max(), freq="W-MON")
+    df = df.set_index("ds").reindex(full_range, fill_value=0).reset_index()
+    df.columns = ["ds", "y"]
+
+    # ── 2. Deteksi & koreksi outlier ──────────────────────────────────────
+    if use_outlier_cap:
+        df["y"] = _deteksi_outlier_iqr(df["y"])
+
+    # ── 3. Tentukan floor & cap ────────────────────────────────────────────
+    floor_val = 0
+    cap_val   = max(df["y"].max() * 1.5, df["y"].mean() * 3)
+    df["floor"] = floor_val
+    df["cap"]   = cap_val
+
+    # Cek apakah lebih cocok logistic (variance tinggi) atau linear
+    cv = df["y"].std() / (df["y"].mean() + 1e-9)
+    use_logistic = cv > 0.6
+
+    growth = "logistic" if use_logistic else "linear"
+    if growth == "linear":
+        df = df.drop(columns=["floor", "cap"])
+
+    # ── 4. Siapkan hari libur ─────────────────────────────────────────────
+    tahun_list = list(range(df["ds"].dt.year.min(), df["ds"].dt.year.max() + 2))
+    df_libur   = _get_hari_libur_indonesia(tahun_list) if use_libur else None
+
+    # ── 5. Bangun model Prophet ───────────────────────────────────────────
+    model_kwargs = dict(
+        growth=growth,
+        changepoint_prior_scale=changepoint_scale,   # fleksibilitas tren
+        seasonality_prior_scale=seasonality_scale,   # kekuatan seasonality
+        seasonality_mode="multiplicative",            # lebih akurat untuk data count
+        yearly_seasonality=True if len(df) >= 52 else False,
+        weekly_seasonality=False,
+        daily_seasonality=False,
+        interval_width=0.80,
+    )
+    if df_libur is not None:
+        model_kwargs["holidays"] = df_libur
+
+    model = Prophet(**model_kwargs)
+
+    # ── 6. Tambah seasonality bulanan kustom ──────────────────────────────
+    if use_monthly and len(df) >= 24:
+        model.add_seasonality(
+            name="monthly",
+            period=30.5,
+            fourier_order=5,   # lebih ekspresif dari default
+            mode="multiplicative",
+        )
+
+    # ── 7. Fit ────────────────────────────────────────────────────────────
+    model.fit(df)
+
+    # ── 8. Prediksi ───────────────────────────────────────────────────────
+    future = model.make_future_dataframe(periods=n_minggu, freq="W-MON")
+    if growth == "logistic":
+        future["floor"] = floor_val
+        future["cap"]   = cap_val
+
+    forecast = model.predict(future)
+    forecast["yhat"]       = forecast["yhat"].clip(lower=0)
+    forecast["yhat_lower"] = forecast["yhat_lower"].clip(lower=0)
+    forecast["yhat_upper"] = forecast["yhat_upper"].clip(lower=0)
+
+    return model, forecast, df
+
+
+# ================== HALAMAN ML (PROPHET) — VERSI AKURASI TINGGI ==================
 def page_ml(df_filtered, filter_info):
-    st.subheader("📈 Prediksi & Peramalan Tren (Prophet)")
+    st.subheader("📈 Prediksi & Peramalan Tren (Prophet — Akurasi Tinggi)")
     show_active_filters(filter_info)
 
     if df_filtered is None or len(df_filtered) == 0:
@@ -691,127 +823,224 @@ def page_ml(df_filtered, filter_info):
     if not pd.api.types.is_datetime64_any_dtype(df_ml["tanggal_kunjungan"]):
         df_ml["tanggal_kunjungan"] = pd.to_datetime(df_ml["tanggal_kunjungan"], errors="coerce")
     df_ml = df_ml.dropna(subset=["tanggal_kunjungan"])
-    
+
     if len(df_ml) == 0:
         st.warning("⚠️ Data tanggal tidak valid.")
         return
 
     max_date = df_ml["tanggal_kunjungan"].max().date()
 
-    st.info("💡 **Model:** Menggunakan Prophet untuk memprediksi tren dan estimasi jumlah kunjungan/kasus di masa depan.")
-    st.markdown("---")
-
+    # ── Panel Pengaturan ──────────────────────────────────────────────────
     with st.container():
         col_set1, col_set2, col_set3 = st.columns([1, 1, 1])
         with col_set1:
-            fokus = st.radio("Analisis:", ["Diagnosa Penyakit", "Poli / Unit"], horizontal=True)
+            fokus = st.radio("Analisis:", ["Diagnosa Penyakit", "Poli / Unit"], horizontal=True, key="ml_fokus")
             kolom_fokus = "diagnosa" if fokus == "Diagnosa Penyakit" else "poli"
-        
         with col_set2:
             if kolom_fokus not in df_ml.columns: return
             top_items = df_ml[kolom_fokus].value_counts().head(30)
-            pilihan_item = st.selectbox(f"Pilih {fokus}:", options=top_items.index.tolist())
-            
+            pilihan_item = st.selectbox(f"Pilih {fokus}:", options=top_items.index.tolist(), key="ml_item")
         with col_set3:
             target_date = st.date_input(
-                "Prediksi Sampai Tanggal:", 
-                value=max_date + pd.Timedelta(days=30), 
+                "Prediksi Sampai Tanggal:",
+                value=max_date + pd.Timedelta(days=30),
                 min_value=max_date + pd.Timedelta(days=1),
-                max_value=max_date + pd.Timedelta(days=365)
+                max_value=max_date + pd.Timedelta(days=365),
+                key="ml_target_date"
             )
 
+    # ── Panel Tuning Model ────────────────────────────────────────────────
+    with st.expander("⚙️ Pengaturan Akurasi Model (Opsional — Default sudah optimal)", expanded=False):
+        st.markdown("Pengaturan ini mempengaruhi kualitas model secara signifikan. Biarkan default jika ragu.")
+        tc1, tc2 = st.columns(2)
+        with tc1:
+            use_outlier_cap  = st.toggle("🧹 Koreksi Outlier Otomatis (IQR)", value=True,
+                help="Mendeteksi & mengoreksi lonjakan/drop ekstrem yang bisa merusak model")
+            use_libur        = st.toggle("🗓️ Gunakan Hari Libur Nasional Indonesia", value=True,
+                help="Kunjungan puskesmas dipengaruhi hari libur. Aktifkan untuk akurasi lebih baik.")
+            use_monthly      = st.toggle("📅 Tambah Pola Musiman Bulanan", value=True,
+                help="Menangkap pola berulang setiap bulan (misalnya puncak awal/akhir bulan)")
+        with tc2:
+            changepoint_scale = st.select_slider(
+                "🔧 Fleksibilitas Tren (Changepoint Scale)",
+                options=[0.01, 0.05, 0.1, 0.3, 0.5],
+                value=0.1,
+                help="Nilai kecil = tren lebih smooth. Nilai besar = tren mengikuti fluktuasi. Default 0.1 biasanya optimal."
+            )
+            seasonality_scale = st.select_slider(
+                "🌊 Kekuatan Musiman (Seasonality Scale)",
+                options=[1.0, 5.0, 10.0, 20.0],
+                value=10.0,
+                help="Nilai lebih besar = pola musiman lebih dominan. Cocok untuk data puskesmas."
+            )
+
+    # ── Persiapan Data ────────────────────────────────────────────────────
     df_item = df_ml[df_ml[kolom_fokus] == pilihan_item].copy()
-    
+
     if len(df_item) < 10:
-        st.error("❌ Data terlalu sedikit (< 10 pasien) untuk dipelajari oleh AI Prophet.")
+        st.error("❌ Data terlalu sedikit (< 10 pasien) untuk dipelajari oleh model.")
         return
 
-    weekly = df_item.groupby(pd.Grouper(key="tanggal_kunjungan", freq="W-MON")).size().reset_index(name="jumlah")
-    df_prophet = weekly.rename(columns={"tanggal_kunjungan": "ds", "jumlah": "y"})
+    weekly = (
+        df_item
+        .groupby(pd.Grouper(key="tanggal_kunjungan", freq="W-MON"))
+        .size()
+        .reset_index(name="jumlah")
+    )
+    df_prophet_raw = weekly.rename(columns={"tanggal_kunjungan": "ds", "jumlah": "y"})
 
-    with st.expander(f"👁️ Lihat Data Rekap yang Sedang Dipelajari AI", expanded=False):
-        st.markdown(f"Untuk memprediksi tren **{pilihan_item}**, AI Prophet membaca tabel rekapitulasi data per minggu di bawah ini sebagai bahan pembelajarannya:")
-        st.dataframe(df_prophet.rename(columns={"ds": "Periode (Minggu)", "y": "Jumlah Pasien"}), use_container_width=True)
+    last_date    = df_prophet_raw["ds"].max().date()
+    target_dt    = pd.to_datetime(target_date).date()
+    delta_days   = (target_dt - last_date).days
+    periods_ahead = max(1, delta_days // 7)
 
-    with st.spinner('AI Prophet sedang memproses pola peramalan...'):
-        model = Prophet(yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False, interval_width=0.80)
-        model.fit(df_prophet)
+    # ── Tampilkan Data Rekap ──────────────────────────────────────────────
+    with st.expander("👁️ Lihat Data Rekap yang Dipelajari Model", expanded=False):
+        st.dataframe(df_prophet_raw.rename(columns={"ds": "Periode (Minggu)", "y": "Jumlah Pasien"}),
+                     use_container_width=True)
 
-        last_date = df_prophet["ds"].max().date()
-        target_dt = pd.to_datetime(target_date).date()
-        delta_days = (target_dt - last_date).days
-        periods_ahead = max(1, delta_days // 7)
+    # ── Training & Forecasting ────────────────────────────────────────────
+    with st.spinner("🔄 Model sedang dilatih dengan semua peningkatan akurasi..."):
+        try:
+            model, forecast, df_prophet_clean = _bangun_model_prophet(
+                df_prophet=df_prophet_raw,
+                n_minggu=periods_ahead,
+                use_monthly=use_monthly,
+                use_outlier_cap=use_outlier_cap,
+                use_libur=use_libur,
+                changepoint_scale=changepoint_scale,
+                seasonality_scale=seasonality_scale,
+            )
+        except Exception as e:
+            st.error(f"❌ Gagal melatih model: {e}")
+            return
 
-        future = model.make_future_dataframe(periods=periods_ahead, freq='W-MON')
-        forecast = model.predict(future)
+    # ── Evaluasi Cepat (In-sample MAPE) ──────────────────────────────────
+    forecast_insample = forecast[forecast["ds"].isin(df_prophet_clean["ds"])].copy()
+    df_eval_q = pd.merge(
+        df_prophet_clean[["ds", "y"]],
+        forecast_insample[["ds", "yhat"]],
+        on="ds", how="inner"
+    )
+    df_eval_q = df_eval_q[df_eval_q["y"] > 0]
+    if len(df_eval_q) > 0:
+        mape_insample = float(np.mean(np.abs((df_eval_q["y"] - df_eval_q["yhat"]) / df_eval_q["y"])) * 100)
+        r2_insample_ss_res = float(np.sum((df_eval_q["y"] - df_eval_q["yhat"]) ** 2))
+        r2_insample_ss_tot = float(np.sum((df_eval_q["y"] - df_eval_q["y"].mean()) ** 2))
+        r2_insample = 1 - r2_insample_ss_res / r2_insample_ss_tot if r2_insample_ss_tot != 0 else float("nan")
 
+        if mape_insample <= 10 and r2_insample >= 0.85:
+            badge_color, badge_text = "#16a34a", f"🟢 Sangat Baik (MAPE {mape_insample:.1f}%, R² {r2_insample:.3f})"
+        elif mape_insample <= 20 and r2_insample >= 0.70:
+            badge_color, badge_text = "#ca8a04", f"🟡 Cukup Baik (MAPE {mape_insample:.1f}%, R² {r2_insample:.3f})"
+        else:
+            badge_color, badge_text = "#dc2626", f"🔴 Perlu Data Lebih Banyak (MAPE {mape_insample:.1f}%)"
+
+        st.markdown(f"""
+        <div style="display:inline-flex;align-items:center;gap:0.6rem;padding:0.35rem 1rem;
+             border-radius:999px;background:{badge_color}22;border:1.5px solid {badge_color};
+             color:{badge_color};font-weight:700;font-size:0.95rem;margin-bottom:0.5rem;">
+            Kualitas Fit Model: {badge_text}
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ── Grafik Utama ──────────────────────────────────────────────────────
     st.markdown(f"### 📈 Grafik Peramalan: **{pilihan_item}**")
+
+    forecast_future = forecast[forecast["ds"] > pd.to_datetime(last_date)].copy()
+    forecast_hist   = forecast[forecast["ds"] <= pd.to_datetime(last_date)].copy()
+
     fig = go.Figure()
 
+    # Area kepercayaan prediksi masa depan
     fig.add_trace(go.Scatter(
-        x=df_prophet['ds'], y=df_prophet['y'], 
-        mode='lines+markers', name='Data Aktual',
-        line=dict(color='#2563eb', width=2)
+        x=forecast_future["ds"].tolist() + forecast_future["ds"].tolist()[::-1],
+        y=forecast_future["yhat_upper"].tolist() + forecast_future["yhat_lower"].tolist()[::-1],
+        fill="toself", fillcolor="rgba(239,68,68,0.15)",
+        line=dict(color="rgba(255,255,255,0)"),
+        name="Rentang Kepercayaan 80%", hoverinfo="skip",
     ))
 
-    forecast_future = forecast[forecast['ds'] > pd.to_datetime(last_date)]
+    # Fit model pada data historis (garis merah halus)
     fig.add_trace(go.Scatter(
-        x=forecast_future['ds'], y=forecast_future['yhat'], 
-        mode='lines+markers', name='Prediksi Masa Depan',
-        line=dict(color='#ef4444', width=3, dash='dash')
+        x=forecast_hist["ds"], y=forecast_hist["yhat"],
+        mode="lines", name="Fit Model (Historis)",
+        line=dict(color="rgba(239,68,68,0.5)", width=1.5, dash="dot"),
     ))
 
+    # Data aktual (setelah outlier dikoreksi)
     fig.add_trace(go.Scatter(
-        x=forecast_future['ds'].tolist() + forecast_future['ds'].tolist()[::-1],
-        y=forecast_future['yhat_upper'].tolist() + forecast_future['yhat_lower'].tolist()[::-1],
-        fill='toself', fillcolor='rgba(239, 68, 68, 0.2)', 
-        line=dict(color='rgba(255,255,255,0)'),
-        name='Rentang Toleransi',
-        hoverinfo="skip"
+        x=df_prophet_clean["ds"], y=df_prophet_clean["y"],
+        mode="lines+markers", name="Data Aktual",
+        line=dict(color="#2563eb", width=2),
+        marker=dict(size=5),
+    ))
+
+    # Prediksi masa depan
+    fig.add_trace(go.Scatter(
+        x=forecast_future["ds"], y=forecast_future["yhat"],
+        mode="lines+markers", name="Prediksi Masa Depan",
+        line=dict(color="#ef4444", width=3, dash="dash"),
+        marker=dict(size=7, symbol="diamond"),
     ))
 
     fig.update_layout(
         xaxis_title="Periode Waktu", yaxis_title="Jumlah Kunjungan/Pasien",
         hovermode="x unified", margin=dict(l=0, r=0, t=30, b=0),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        height=420,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
     st.plotly_chart(fig, use_container_width=True)
 
-    df_download_pred = forecast_future[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].copy()
-    df_download_pred.columns = ['Tanggal', 'Prediksi_Jumlah', 'Batas_Bawah', 'Batas_Atas']
+    # ── Grafik Komponen Seasonality ───────────────────────────────────────
+    with st.expander("🔍 Lihat Komponen Pola Model (Tren, Musiman, Libur)", expanded=False):
+        st.markdown("Grafik di bawah menunjukkan kontribusi masing-masing komponen yang dipelajari model.")
+        try:
+            fig_comp = model.plot_components(forecast)
+            st.pyplot(fig_comp, use_container_width=True)
+        except Exception:
+            st.info("Grafik komponen tidak tersedia untuk konfigurasi model ini.")
+
+    # ── Download Prediksi ─────────────────────────────────────────────────
+    df_download_pred = forecast_future[["ds", "yhat", "yhat_lower", "yhat_upper"]].copy()
+    df_download_pred.columns = ["Tanggal", "Prediksi_Jumlah", "Batas_Bawah", "Batas_Atas"]
     st.download_button(
         label="📥 Download Data Prediksi (Excel)",
         data=convert_df_to_excel(df_download_pred),
         file_name=f"prediksi_{kolom_fokus}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
+    # ── Kesimpulan Estimasi ───────────────────────────────────────────────
     st.markdown(f"### 📢 Kesimpulan Estimasi Hingga {pd.to_datetime(target_date).strftime('%d %B %Y')}")
     if not forecast_future.empty:
-        total_estimasi = int(round(forecast_future["yhat"].clip(lower=0).sum()))
-        
-        target_week = forecast_future.iloc[-1]
-        tgl_target_akhir = target_week["ds"].strftime("%d %B %Y")
-        
-        est_kunjungan_akhir = max(0, int(round(target_week["yhat"])))
-        batas_bawah_akhir = max(0, int(round(target_week["yhat_lower"])))
-        batas_atas_akhir = max(0, int(round(target_week["yhat_upper"])))
+        total_estimasi       = int(round(forecast_future["yhat"].clip(lower=0).sum()))
+        target_week          = forecast_future.iloc[-1]
+        tgl_target_akhir     = target_week["ds"].strftime("%d %B %Y")
+        est_kunjungan_akhir  = max(0, int(round(target_week["yhat"])))
+        batas_bawah_akhir    = max(0, int(round(target_week["yhat_lower"])))
+        batas_atas_akhir     = max(0, int(round(target_week["yhat_upper"])))
 
         col_alert, col_metric1, col_metric2 = st.columns([2, 1, 1])
         with col_alert:
             st.markdown(f"""
-                <div style="padding: 1rem; border-radius: 0.5rem; background-color: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); margin-bottom: 1rem;">
+                <div style="padding:1rem;border-radius:0.5rem;background-color:rgba(59,130,246,0.1);
+                     border:1px solid rgba(59,130,246,0.3);margin-bottom:1rem;">
                     <div class="highlight-estimasi">
-                        📆 Selama periode ke depan hingga <b>{tgl_target_akhir}</b>, AI memperkirakan akan ada <b>total akumulasi {total_estimasi} kunjungan/kasus</b> untuk <b>{pilihan_item}</b>. <br><br>
-                        Sementara itu, khusus pada pekan terakhir tersebut, diprediksi terdapat <b>{est_kunjungan_akhir} kunjungan</b> baru.
+                        📆 Selama periode ke depan hingga <b>{tgl_target_akhir}</b>, model memperkirakan
+                        akan ada <b>total akumulasi {total_estimasi} kunjungan/kasus</b> untuk
+                        <b>{pilihan_item}</b>.<br><br>
+                        Khusus pada pekan terakhir tersebut, diprediksi terdapat
+                        <b>{est_kunjungan_akhir} kunjungan</b> baru
+                        (rentang: {batas_bawah_akhir}–{batas_atas_akhir}).
                     </div>
                 </div>
             """, unsafe_allow_html=True)
-            
         with col_metric1:
             st.metric("Total Akumulasi Pasien", f"{total_estimasi} Pasien")
         with col_metric2:
-            st.metric("Estimasi Pekan Terakhir", f"{est_kunjungan_akhir} Pasien", help=f"Batas Bawah: {batas_bawah_akhir} | Batas Atas: {batas_atas_akhir}")
+            st.metric("Estimasi Pekan Terakhir", f"{est_kunjungan_akhir} Pasien",
+                      help=f"Batas Bawah: {batas_bawah_akhir} | Batas Atas: {batas_atas_akhir}")
     else:
         st.info("Tanggal prediksi terlalu dekat dengan data terakhir.")
 
@@ -1177,16 +1406,19 @@ def page_evaluasi_akurasi(df_filtered, filter_info):
     """)
 
     with st.spinner(f"🔄 Model sedang belajar dari {n_train} minggu data training..."):
-        model_eval = Prophet(
-            yearly_seasonality=True,
-            weekly_seasonality=False,
-            daily_seasonality=False,
-            interval_width=0.80
-        )
-        model_eval.fit(df_train_eval)
-
-        future_eval = model_eval.make_future_dataframe(periods=n_test, freq="W-MON")
-        forecast_eval_full = model_eval.predict(future_eval)
+        try:
+            model_eval, forecast_eval_full, df_train_clean = _bangun_model_prophet(
+                df_prophet=df_train_eval,
+                n_minggu=n_test,
+                use_monthly=True,
+                use_outlier_cap=True,
+                use_libur=True,
+                changepoint_scale=0.1,
+                seasonality_scale=10.0,
+            )
+        except Exception as e:
+            st.error(f"❌ Gagal melatih model evaluasi: {e}")
+            return
         forecast_test_eval = forecast_eval_full[forecast_eval_full["ds"].isin(df_test_eval["ds"])].copy()
 
     if forecast_test_eval.empty:

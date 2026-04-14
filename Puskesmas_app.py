@@ -1613,7 +1613,7 @@ def main():
     page = st.sidebar.radio("Navigasi", [
         "Ringkasan Umum", "Analisis Kunjungan", "Analisis Penyakit", 
         "Peta Persebaran", "Analisis Pembiayaan", "Data & Unduhan", 
-        "Kualitas Data", "Prediksi ML", "📐 Evaluasi Akurasi Model",
+        "Kualitas Data", "Prediksi ML", "Evaluasi Akurasi Model",
         "Agent AI", "Cetak Laporan PDF"
     ])
     
@@ -1625,7 +1625,7 @@ def main():
     elif page == "Data & Unduhan": page_data(df_filtered, filter_info)
     elif page == "Kualitas Data": page_quality(df_filtered)
     elif page == "Prediksi ML": page_ml(df_filtered, filter_info)
-    elif page == "📐 Evaluasi Akurasi Model": page_evaluasi_akurasi(df_filtered, filter_info)
+    elif page == "Evaluasi Akurasi Model": page_evaluasi_akurasi(df_filtered, filter_info)
     elif page == "Agent AI": page_ai_assistant(df_filtered, filter_info, is_genai_configured)
     elif page == "Cetak Laporan PDF": page_cetak_laporan(df_filtered, filter_info)
 

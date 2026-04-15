@@ -410,7 +410,6 @@ def run_xgboost(train_df, periods, freq="W-MON"):
 # ── SARIMA ───────────────────────────────────────────────────
 def run_sarima(train_df, periods):
     """Fit SARIMA(1,1,1)(1,1,0,52) dan prediksi."""
-    # PERBAIKAN: Menggunakan .ffill() alih-alih .fillna(method="ffill")
     ts = train_df.set_index("ds")["y"].asfreq("W-MON").ffill()
     try:
         model = SARIMAX(
@@ -803,7 +802,6 @@ def page_disease_seasonality(df_filtered, filter_info):
             df_comp_top = df_comp.sort_values("Selisih", key=abs, ascending=False).head(15)
             st.dataframe(df_comp_top.reset_index().rename(columns={"diagnosa":"Diagnosa"}), use_container_width=True, hide_index=True)
             
-        # --- TAMBAHAN: TABEL RINCIAN KESELURUHAN PER MUSIM ---
         st.markdown("#### 📋 Rincian Lengkap Kasus per Musim")
         df_rincian = df.groupby(["diagnosa", "musim"]).size().reset_index(name="Jumlah Kasus")
         df_pivot = df_rincian.pivot(index="diagnosa", columns="musim", values="Jumlah Kasus").fillna(0).astype(int)
@@ -970,7 +968,7 @@ def page_peta_persebaran(df_filtered, filter_info):
     if map_event and map_event.get("selection") and map_event["selection"].get("points"):
         selected_desa = map_event["selection"]["points"][0]["customdata"][0]
 
-    # --- TAMPILAN BERDASARKAN EVENT KLIK ---
+    # --- TAMPILAN BERDASARKAN EVENT KLIK (URUTAN BARU) ---
     if selected_desa:
         st.markdown("---")
         st.markdown(f"### 📍 Rincian Khusus Desa: **{selected_desa}**")
@@ -978,20 +976,18 @@ def page_peta_persebaran(df_filtered, filter_info):
         # Ambil data mentah khusus untuk desa ini
         df_desa_detail = df_filtered[df_filtered["desa"].str.title() == selected_desa]
         
-        col1, col2 = st.columns([1, 1.2])
+        # 1. Tampilkan Grafik (Full Width)
+        st.markdown("#### 📊 Top Diagnosa")
+        df_desa_diag = df_desa_detail["diagnosa"].value_counts().head(10).reset_index()
+        df_desa_diag.columns = ["Diagnosa", "Jumlah Kasus"]
+        fig_desa = px.bar(df_desa_diag, x="Jumlah Kasus", y="Diagnosa", orientation="h", color="Jumlah Kasus", color_continuous_scale="Viridis")
+        fig_desa.update_layout(yaxis=dict(categoryorder="total ascending"), height=400, margin=dict(l=0, r=0, t=20, b=0))
+        st.plotly_chart(fig_desa, use_container_width=True)
         
-        with col1:
-            st.markdown("#### 📊 Top Diagnosa")
-            df_desa_diag = df_desa_detail["diagnosa"].value_counts().head(7).reset_index()
-            df_desa_diag.columns = ["Diagnosa", "Jumlah Kasus"]
-            fig_desa = px.bar(df_desa_diag, x="Jumlah Kasus", y="Diagnosa", orientation="h", color="Jumlah Kasus", color_continuous_scale="Viridis")
-            fig_desa.update_layout(yaxis=dict(categoryorder="total ascending"), height=350, margin=dict(l=0, r=0, t=0, b=0))
-            st.plotly_chart(fig_desa, use_container_width=True)
-            
-        with col2:
-            st.markdown("#### 📋 Data Histori Kunjungan")
-            kolom_tabel = [c for c in ["tanggal_kunjungan", "no_rm", "umur", "jenis_kelamin", "diagnosa", "poli"] if c in df_desa_detail.columns]
-            st.dataframe(df_desa_detail[kolom_tabel], use_container_width=True, height=350, hide_index=True)
+        # 2. Tampilkan Tabel (Full Width di bawah grafik)
+        st.markdown("#### 📋 Data Histori Kunjungan")
+        kolom_tabel = [c for c in ["tanggal_kunjungan", "no_rm", "umur", "jenis_kelamin", "diagnosa", "poli"] if c in df_desa_detail.columns]
+        st.dataframe(df_desa_detail[kolom_tabel], use_container_width=True, hide_index=True)
             
     else:
         # Tampilan default jika belum ada titik yang diklik

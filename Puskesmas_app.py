@@ -410,7 +410,7 @@ def run_xgboost(train_df, periods, freq="W-MON"):
 # ── SARIMA ───────────────────────────────────────────────────
 def run_sarima(train_df, periods):
     """Fit SARIMA(1,1,1)(1,1,0,52) dan prediksi."""
-    ts = train_df.set_index("ds")["y"].asfreq("W-MON").ffill()
+    ts = train_df.set_index("ds")["y"].asfreq("W-MON").fillna(method="ffill")
     try:
         model = SARIMAX(
             ts, order=(1,1,1), seasonal_order=(1,1,0,52),

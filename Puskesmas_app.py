@@ -410,8 +410,7 @@ def run_xgboost(train_df, periods, freq="W-MON"):
 # ── SARIMA ───────────────────────────────────────────────────
 def run_sarima(train_df, periods):
     """Fit SARIMA(1,1,1)(1,1,0,52) dan prediksi."""
-    # KODE BARU
-ts = train_df.set_index("ds")["y"].asfreq("W-MON").ffill()
+    ts = train_df.set_index("ds")["y"].asfreq("W-MON").ffill()
     try:
         model = SARIMAX(
             ts, order=(1,1,1), seasonal_order=(1,1,0,52),
@@ -823,7 +822,7 @@ def page_disease_seasonality(df_filtered, filter_info):
 
 
 # ══════════════════════════════════════════════════════════════
-# HALAMAN LAMA (dipertahankan)
+# HALAMAN LAMA RINGKASAN UMUM
 # ══════════════════════════════════════════════════════════════
 
 def page_overview(df_filtered, filter_info):

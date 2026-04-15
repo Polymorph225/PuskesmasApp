@@ -205,6 +205,7 @@ def load_data(file):
 
 def preprocess_data(df):
     if df is None or df.empty: return df
+    df = df.copy()
     df.columns = [c.strip().lower() for c in df.columns]
     if "umur" in df.columns:
         df["umur"] = pd.to_numeric(df["umur"], errors="coerce")
@@ -212,10 +213,25 @@ def preprocess_data(df):
         labels = ["<1 th","1-4 th","5-14 th","15-24 th","25-44 th","45-59 th","60+ th"]
         df["kelompok_umur"] = pd.cut(df["umur"], bins=bins, labels=labels, right=False)
     if "tanggal_kunjungan" in df.columns:
+        # ── FIX: pastikan tipe datetime dan buang baris dengan tanggal tidak valid ──
+        df["tanggal_kunjungan"] = pd.to_datetime(df["tanggal_kunjungan"], errors="coerce")
+        df = df.dropna(subset=["tanggal_kunjungan"]).reset_index(drop=True)
+
         df["tahun"]      = df["tanggal_kunjungan"].dt.year
         df["bulan"]      = df["tanggal_kunjungan"].dt.month
         df["nama_bulan"] = df["tanggal_kunjungan"].dt.strftime("%b")
-        df["minggu"]     = df["tanggal_kunjungan"].dt.isocalendar().week.astype(int)
+
+        # ── FIX: isocalendar().week mengembalikan UInt32 nullable → gunakan Int64
+        #         agar tidak crash saat ada nilai NA (seharusnya sudah tidak ada
+        #         setelah dropna di atas, tapi ini sebagai lapisan keamanan ekstra)
+        df["minggu"]  = (
+            df["tanggal_kunjungan"]
+            .dt.isocalendar()
+            .week
+            .astype("Int64")   # nullable integer, aman terhadap NA
+            .astype(int)       # konversi akhir ke int biasa (aman karena NA sudah hilang)
+        )
+
         df["hari_ke"]    = df["tanggal_kunjungan"].dt.dayofyear
         # Musim hujan Indonesia: Nov-Apr → 1, kemarau: Mei-Okt → 0
         df["musim_hujan"] = df["bulan"].apply(lambda m: 1 if m in [11,12,1,2,3,4] else 0)
@@ -297,7 +313,10 @@ def show_active_filters(fi):
 def build_features(weekly: pd.DataFrame) -> pd.DataFrame:
     """Tambahkan fitur temporal & lag ke data mingguan."""
     df = weekly.copy().sort_values("ds").reset_index(drop=True)
-    df["week_of_year"]  = df["ds"].dt.isocalendar().week.astype(int)
+    # ── FIX: isocalendar().week → Int64 dulu sebelum astype(int) ──
+    df["week_of_year"] = (
+        df["ds"].dt.isocalendar().week.astype("Int64").astype(int)
+    )
     df["month"]         = df["ds"].dt.month
     df["quarter"]       = df["ds"].dt.quarter
     df["year"]          = df["ds"].dt.year
@@ -385,6 +404,7 @@ def run_xgboost(train_df, periods, freq="W-MON"):
     for i in range(periods):
         next_date = last_date + pd.Timedelta(weeks=i+1)
         row = {
+            # ── FIX: isocalendar() mengembalikan named tuple; ambil elemen ke-2 (week) ──
             "week_of_year": int(next_date.isocalendar()[1]),
             "month":        next_date.month,
             "quarter":      (next_date.month - 1) // 3 + 1,
@@ -909,10 +929,8 @@ def page_penyakit(df_filtered, filter_info):
                      text="Jumlah Kasus", color="Jumlah Kasus", color_continuous_scale="Blues")
         fig.update_layout(xaxis=dict(tickangle=-35), coloraxis_showscale=False, height=chart_h)
         
-    # --- 1. TAMPILKAN GRAFIK ---
     st.plotly_chart(fig, use_container_width=True)
     
-    # --- 2. TAMBAHAN: TABEL RINCIAN ---
     st.markdown("### 📋 Rincian Data Penyakit")
     st.dataframe(df_diag, use_container_width=True, hide_index=True)
     
@@ -950,12 +968,11 @@ def page_peta_persebaran(df_filtered, filter_info):
     df_grouped["latitude"]  = df_grouped["desa"].apply(lambda x: get_koord(x)[0])
     df_grouped["longitude"] = df_grouped["desa"].apply(lambda x: get_koord(x)[1])
     
-    # --- RENDER PETA DENGAN CUSTOM_DATA ---
     fig = px.scatter_mapbox(
         df_grouped, lat="latitude", lon="longitude",
         color="diagnosa", size="jumlah_kasus",
         hover_name="desa", hover_data={"diagnosa":True,"jumlah_kasus":True},
-        custom_data=["desa"], # WAJIB ADA UNTUK EVENT KLIK
+        custom_data=["desa"],
         zoom=11.5, center={"lat":-7.218,"lon":111.675}, height=550,
         color_discrete_sequence=px.colors.qualitative.Plotly,
     )
@@ -963,23 +980,18 @@ def page_peta_persebaran(df_filtered, filter_info):
     
     st.markdown("*(💡 Klik salah satu titik/lingkaran pada peta untuk melihat detail data dari desa tersebut)*")
     
-    # --- TANGKAP EVENT KLIK ---
     map_event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points")
 
-    # Ekstrak nama desa jika diklik
     selected_desa = None
     if map_event and map_event.get("selection") and map_event["selection"].get("points"):
         selected_desa = map_event["selection"]["points"][0]["customdata"][0]
 
-    # --- TAMPILAN BERDASARKAN EVENT KLIK (URUTAN BARU) ---
     if selected_desa:
         st.markdown("---")
         st.markdown(f"### 📍 Rincian Khusus Desa: **{selected_desa}**")
         
-        # Ambil data mentah khusus untuk desa ini
         df_desa_detail = df_filtered[df_filtered["desa"].str.title() == selected_desa]
         
-        # 1. Tampilkan Grafik (Full Width)
         st.markdown("#### 📊 Top Diagnosa")
         df_desa_diag = df_desa_detail["diagnosa"].value_counts().head(10).reset_index()
         df_desa_diag.columns = ["Diagnosa", "Jumlah Kasus"]
@@ -987,13 +999,11 @@ def page_peta_persebaran(df_filtered, filter_info):
         fig_desa.update_layout(yaxis=dict(categoryorder="total ascending"), height=400, margin=dict(l=0, r=0, t=20, b=0))
         st.plotly_chart(fig_desa, use_container_width=True)
         
-        # 2. Tampilkan Tabel (Full Width di bawah grafik)
         st.markdown("#### 📋 Data Histori Kunjungan")
         kolom_tabel = [c for c in ["tanggal_kunjungan", "no_rm", "umur", "jenis_kelamin", "diagnosa", "poli"] if c in df_desa_detail.columns]
         st.dataframe(df_desa_detail[kolom_tabel], use_container_width=True, hide_index=True)
             
     else:
-        # Tampilan default jika belum ada titik yang diklik
         st.markdown("### 📋 Tabel Akumulasi (Seluruh Desa yang Tampil)")
         st.dataframe(df_grouped.sort_values("jumlah_kasus", ascending=False).drop(columns=["latitude", "longitude"]), use_container_width=True, hide_index=True)
 

@@ -96,6 +96,9 @@ Dashboard ini membantu menganalisis **data kunjungan Puskesmas** dengan:
 - **Disease Dominance Detection** per musim/bulan
 - **Evaluasi Akurasi** model (MAE, RMSE, MAPE) ditampilkan ke pengguna
 
+Untuk data cleaning dapat menggunakan aplikasi berikut:
+https://data-cleaning-app-for-puskesmasapp.streamlit.app/
+
 ⬅️ **Mulai dengan meng-upload file data di sidebar.**
 """)
 

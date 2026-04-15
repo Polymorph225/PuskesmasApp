@@ -92,7 +92,7 @@ st.title("📊 Dashboard Analisis Data Puskesmas")
 st.markdown("""
 Dashboard ini membantu menganalisis **data kunjungan Puskesmas** dengan:
 - Filter interaktif: Poli, Diagnosa, Umur, Desa, Pembiayaan
-- **Ensemble Forecasting:** Prophet + XGBoost + SARIMA + Auto-Selection terbaik
+- **Ensemble Forecasting:**
 - **Disease Dominance Detection** per musim/bulan
 - **Evaluasi Akurasi** model (MAE, RMSE, MAPE) ditampilkan ke pengguna
 

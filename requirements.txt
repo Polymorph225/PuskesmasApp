@@ -1,10 +1,30 @@
-streamlit
-pandas
-numpy
-plotly
-prophet
+# ── Core Framework ──────────────────────────────────────────
+streamlit>=1.35.0
+
+# ── Data Manipulation ────────────────────────────────────────
+pandas>=2.0.0
+numpy>=1.26.0
+openpyxl>=3.1.2
+xlrd>=2.0.1
+
+# ── Visualization ────────────────────────────────────────────
+plotly>=5.20.0
+kaleido>=0.2.1          # untuk export grafik ke PNG (laporan PDF)
+
+# ── Time-Series Forecasting ──────────────────────────────────
+prophet>=1.1.5
+statsmodels>=0.14.1     # SARIMA / SARIMAX
+
+# ── Machine Learning ─────────────────────────────────────────
+xgboost>=2.0.3
+scikit-learn>=1.4.0
+
+# ── AI / LLM ─────────────────────────────────────────────────
 google-generativeai
-openpyxl
-xlrd
-fpdf==1.7.2
-kaleido==0.2.1
+
+# ── PDF Export ───────────────────────────────────────────────
+fpdf2>=2.7.9
+
+# ── Utilities ────────────────────────────────────────────────
+pystan>=3.7.0           # diperlukan Prophet (backend Stan)
+holidays>=0.46          # opsional: deteksi hari libur nasional Indonesia

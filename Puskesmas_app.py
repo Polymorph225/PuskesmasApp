@@ -92,7 +92,7 @@ st.title("📊 Dashboard Analisis Data Puskesmas")
 st.markdown("""
 Dashboard ini membantu menganalisis **data kunjungan Puskesmas** dengan:
 - Filter interaktif: Poli, Diagnosa, Umur, Desa, Pembiayaan
-- **Ensemble Forecasting:**
+- **Ensemble Forecasting:** Prophet + XGBoost + SARIMA + Auto-Selection terbaik
 - **Disease Dominance Detection** per musim/bulan
 - **Evaluasi Akurasi** model (MAE, RMSE, MAPE) ditampilkan ke pengguna
 
@@ -410,7 +410,8 @@ def run_xgboost(train_df, periods, freq="W-MON"):
 # ── SARIMA ───────────────────────────────────────────────────
 def run_sarima(train_df, periods):
     """Fit SARIMA(1,1,1)(1,1,0,52) dan prediksi."""
-    ts = train_df.set_index("ds")["y"].asfreq("W-MON").fillna(method="ffill")
+    # PERBAIKAN: Menggunakan .ffill() alih-alih .fillna(method="ffill")
+    ts = train_df.set_index("ds")["y"].asfreq("W-MON").ffill()
     try:
         model = SARIMAX(
             ts, order=(1,1,1), seasonal_order=(1,1,0,52),
@@ -518,7 +519,7 @@ def ensemble_forecast(train_df: pd.DataFrame, periods: int):
 # ══════════════════════════════════════════════════════════════
 
 def page_ml_upgraded(df_filtered, filter_info):
-    st.subheader("🤖 Ensemble AI Forecasting")
+    st.subheader("🤖 Ensemble AI Forecasting (Prophet + XGBoost + SARIMA)")
     show_active_filters(filter_info)
 
     if df_filtered is None or len(df_filtered) == 0:
@@ -791,7 +792,6 @@ def page_disease_seasonality(df_filtered, filter_info):
             fig.update_layout(coloraxis_showscale=False, height=350, yaxis=dict(categoryorder="total ascending"))
             col_ui.plotly_chart(fig, use_container_width=True)
 
-        # Penyakit yang berbeda signifikan antar musim
         st.markdown("#### 📊 Perbandingan Intensitas Penyakit: Hujan vs Kemarau")
         df_comp = df.groupby(["musim","diagnosa"]).size().unstack(fill_value=0).T
         if df_comp.shape[1] == 2:
@@ -800,8 +800,16 @@ def page_disease_seasonality(df_filtered, filter_info):
             df_comp["Dominan_Musim"] = df_comp["Selisih"].apply(
                 lambda x: "🌧️ Hujan" if x > 0 else "☀️ Kemarau"
             )
-            df_comp = df_comp.sort_values("Selisih", key=abs, ascending=False).head(15)
-            st.dataframe(df_comp.reset_index().rename(columns={"diagnosa":"Diagnosa"}), use_container_width=True)
+            df_comp_top = df_comp.sort_values("Selisih", key=abs, ascending=False).head(15)
+            st.dataframe(df_comp_top.reset_index().rename(columns={"diagnosa":"Diagnosa"}), use_container_width=True, hide_index=True)
+            
+        # --- TAMBAHAN: TABEL RINCIAN KESELURUHAN PER MUSIM ---
+        st.markdown("#### 📋 Rincian Lengkap Kasus per Musim")
+        df_rincian = df.groupby(["diagnosa", "musim"]).size().reset_index(name="Jumlah Kasus")
+        df_pivot = df_rincian.pivot(index="diagnosa", columns="musim", values="Jumlah Kasus").fillna(0).astype(int)
+        df_pivot["Total Kasus"] = df_pivot.sum(axis=1)
+        df_pivot = df_pivot.sort_values("Total Kasus", ascending=False).reset_index()
+        st.dataframe(df_pivot, use_container_width=True, hide_index=True)
 
     with tab3:
         st.markdown("#### 📈 Tren Bulanan Penyakit Tertentu")
@@ -822,7 +830,7 @@ def page_disease_seasonality(df_filtered, filter_info):
 
 
 # ══════════════════════════════════════════════════════════════
-# HALAMAN LAMA (dipertahankan)
+# HALAMAN LAINNYA
 # ══════════════════════════════════════════════════════════════
 
 def page_overview(df_filtered, filter_info):
@@ -840,7 +848,7 @@ def page_overview(df_filtered, filter_info):
     if "tanggal_kunjungan" in df_filtered.columns:
         st.markdown("### 📈 Tren Kunjungan")
         trend = df_filtered.groupby(["tahun","bulan","nama_bulan"]).size().reset_index(name="count") \
-                            .sort_values(["tahun","bulan"])
+                           .sort_values(["tahun","bulan"])
         trend["label"] = trend["nama_bulan"].astype(str) + "-" + trend["tahun"].astype(str)
         st.line_chart(trend.set_index("label")["count"])
         st.download_button("📥 Download Tren", convert_df_to_excel(trend), "tren_kunjungan.xlsx")
@@ -875,16 +883,19 @@ def page_penyakit(df_filtered, filter_info):
     if "diagnosa" not in df_filtered.columns:
         st.error("❌ Kolom 'diagnosa' tidak ditemukan.")
         return
+        
     col_s, col_u, col_t = st.columns([2,2,1])
     with col_s: top_n = st.slider("Jumlah diagnosa", 5, 30, 10)
     with col_u:
         urutan = st.radio("Urut:", ["⬇️ Terbanyak","⬆️ Tersedikit"], horizontal=True)
     with col_t:
         orientasi = st.selectbox("Orientasi", ["Horizontal","Vertikal"])
+        
     ascending = urutan.startswith("⬆️")
     df_diag = df_filtered["diagnosa"].value_counts().head(top_n).reset_index()
     df_diag.columns = ["Diagnosa","Jumlah Kasus"]
     df_diag = df_diag.sort_values("Jumlah Kasus", ascending=ascending).reset_index(drop=True)
+    
     chart_h = max(350, top_n * 38)
     if orientasi == "Horizontal":
         fig = px.bar(df_diag, x="Jumlah Kasus", y="Diagnosa", orientation="h",
@@ -896,7 +907,14 @@ def page_penyakit(df_filtered, filter_info):
         fig = px.bar(df_diag, x="Diagnosa", y="Jumlah Kasus",
                      text="Jumlah Kasus", color="Jumlah Kasus", color_continuous_scale="Blues")
         fig.update_layout(xaxis=dict(tickangle=-35), coloraxis_showscale=False, height=chart_h)
+        
+    # --- 1. TAMPILKAN GRAFIK ---
     st.plotly_chart(fig, use_container_width=True)
+    
+    # --- 2. TAMBAHAN: TABEL RINCIAN ---
+    st.markdown("### 📋 Rincian Data Penyakit")
+    st.dataframe(df_diag, use_container_width=True, hide_index=True)
+    
     st.download_button("📥 Download Data Penyakit", convert_df_to_excel(df_diag), "top_penyakit.xlsx")
 
 
@@ -907,13 +925,17 @@ def page_peta_persebaran(df_filtered, filter_info):
     if not {"desa","diagnosa"}.issubset(df_filtered.columns):
         st.error("❌ Butuh kolom 'desa' dan 'diagnosa'.")
         return
+        
     top_penyakit = df_filtered["diagnosa"].value_counts().head(20).index.tolist()
-    pilihan = st.selectbox("Pilih Diagnosa:", ["-- Semua Top 10 --"] + top_penyakit)
+    pilihan = st.selectbox("Filter Peta (Berdasarkan Diagnosa):", ["-- Semua Top 10 --"] + top_penyakit)
+    
     if pilihan != "-- Semua Top 10 --":
         df_map = df_filtered[df_filtered["diagnosa"] == pilihan].copy()
     else:
         df_map = df_filtered[df_filtered["diagnosa"].isin(df_filtered["diagnosa"].value_counts().head(10).index)]
+        
     df_grouped = df_map.groupby(["desa","diagnosa"]).size().reset_index(name="jumlah_kasus")
+    
     koordinat_desa = {
         "Donan":(-7.2131,111.6364),"Gapluk":(-7.2017,111.6617),
         "Kaliombo":(-7.235,111.6817),"Kuniran":(-7.2346,111.6510),
@@ -923,78 +945,58 @@ def page_peta_persebaran(df_filtered, filter_info):
         "Tinumpuk":(-7.2117,111.68),"Tlatah":(-7.2172,111.6975),
     }
     def get_koord(desa): return koordinat_desa.get(str(desa).strip().title(), (-7.1509,111.8817))
+    
     df_grouped["latitude"]  = df_grouped["desa"].apply(lambda x: get_koord(x)[0])
     df_grouped["longitude"] = df_grouped["desa"].apply(lambda x: get_koord(x)[1])
+    
+    # --- RENDER PETA DENGAN CUSTOM_DATA ---
     fig = px.scatter_mapbox(
         df_grouped, lat="latitude", lon="longitude",
         color="diagnosa", size="jumlah_kasus",
         hover_name="desa", hover_data={"diagnosa":True,"jumlah_kasus":True},
+        custom_data=["desa"], # WAJIB ADA UNTUK EVENT KLIK
         zoom=11.5, center={"lat":-7.218,"lon":111.675}, height=550,
         color_discrete_sequence=px.colors.qualitative.Plotly,
     )
-    fig.update_layout(mapbox_style=map_style)
-    fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
+    fig.update_layout(mapbox_style="carto-positron", margin={"r":0,"t":0,"l":0,"b":0})
     
-    clicked_desa = None
-    try:
-        event = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
-        if hasattr(event, "selection") and hasattr(event.selection, "points") and len(event.selection.points) > 0:
-            point = event.selection.points[0]
-            if "customdata" in point:
-                clicked_desa = point["customdata"][0]
-            elif "hovertext" in point:
-                clicked_desa = point["hovertext"]
-    except TypeError:
-        st.plotly_chart(fig, use_container_width=True)
-        pilihan_fallback = st.selectbox("Pilih Desa untuk melihat statistik spesifik:", options=["-- Klik Pilih --"] + sorted(df_filtered["desa"].dropna().unique().tolist()))
-        if pilihan_fallback != "-- Klik Pilih --":
-            clicked_desa = pilihan_fallback
+    st.markdown("*(💡 Klik salah satu titik/lingkaran pada peta untuk melihat detail data dari desa tersebut)*")
+    
+    # --- TANGKAP EVENT KLIK ---
+    map_event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points")
 
-    st.info("👆 **TIPS INTERAKTIF:** Klik pada salah satu titik/lingkaran desa di peta untuk melihat profil statistik kesehatannya secara langsung!")
+    # Ekstrak nama desa jika diklik
+    selected_desa = None
+    if map_event and map_event.get("selection") and map_event["selection"].get("points"):
+        selected_desa = map_event["selection"]["points"][0]["customdata"][0]
 
-    if clicked_desa:
+    # --- TAMPILAN BERDASARKAN EVENT KLIK ---
+    if selected_desa:
         st.markdown("---")
-        st.markdown(f"### 📍 Profil Kesehatan Desa: **{clicked_desa}**")
+        st.markdown(f"### 📍 Rincian Khusus Desa: **{selected_desa}**")
         
-        df_desa = df_filtered[df_filtered["desa"] == clicked_desa]
+        # Ambil data mentah khusus untuk desa ini
+        df_desa_detail = df_filtered[df_filtered["desa"].str.title() == selected_desa]
         
-        if len(df_desa) > 0:
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Total Kunjungan", f"{len(df_desa)} Pasien")
-            
-            penyakit_terbanyak = df_desa["diagnosa"].mode()[0] if "diagnosa" in df_desa.columns and not df_desa["diagnosa"].empty else "-"
-            c2.metric("Penyakit Dominan", penyakit_terbanyak)
-            
-            if "jenis_kelamin" in df_desa.columns:
-                mayoritas_gender = df_desa["jenis_kelamin"].mode()[0] if not df_desa["jenis_kelamin"].empty else "-"
-                c3.metric("Mayoritas Gender", mayoritas_gender)
-            
-            col_d1, col_d2 = st.columns(2)
-            with col_d1:
-                st.markdown("**Top 5 Penyakit Terbanyak**")
-                st.bar_chart(df_desa["diagnosa"].value_counts().head(5))
-            with col_d2:
-                st.markdown("**Demografi Usia Pasien**")
-                if "kelompok_umur" in df_desa.columns:
-                    st.bar_chart(df_desa["kelompok_umur"].value_counts().sort_index())
-                    
-        else:
-            st.warning(f"Data tidak tersedia untuk desa {clicked_desa}.")
-            
-        st.caption("ℹ️ *Klik pada area kosong di peta atau klik ulang titik desa untuk menutup profil ini.*")
+        col1, col2 = st.columns([1, 1.2])
         
-    st.markdown("---")
-    col_tabel, col_grafik = st.columns([1, 1])
-    
-    with col_tabel:
-        st.markdown("#### 📋 Detail Kasus per Desa")
-        st.dataframe(df_grouped[["desa", "diagnosa", "jumlah_kasus"]].sort_values(by="jumlah_kasus", ascending=False), use_container_width=True, hide_index=True)
-
-    with col_grafik:
-        st.markdown("#### 📊 Top Desa Terdampak")
-        top_desa_df = df_grouped.groupby("desa")["jumlah_kasus"].sum().reset_index().sort_values("jumlah_kasus", ascending=False).head(10)
-        st.bar_chart(top_desa_df.set_index("desa")["jumlah_kasus"])
-        st.download_button("📥 Download Data Top Desa (Excel)", convert_df_to_excel(top_desa_df), "top_desa_terdampak.xlsx")
+        with col1:
+            st.markdown("#### 📊 Top Diagnosa")
+            df_desa_diag = df_desa_detail["diagnosa"].value_counts().head(7).reset_index()
+            df_desa_diag.columns = ["Diagnosa", "Jumlah Kasus"]
+            fig_desa = px.bar(df_desa_diag, x="Jumlah Kasus", y="Diagnosa", orientation="h", color="Jumlah Kasus", color_continuous_scale="Viridis")
+            fig_desa.update_layout(yaxis=dict(categoryorder="total ascending"), height=350, margin=dict(l=0, r=0, t=0, b=0))
+            st.plotly_chart(fig_desa, use_container_width=True)
+            
+        with col2:
+            st.markdown("#### 📋 Data Histori Kunjungan")
+            kolom_tabel = [c for c in ["tanggal_kunjungan", "no_rm", "umur", "jenis_kelamin", "diagnosa", "poli"] if c in df_desa_detail.columns]
+            st.dataframe(df_desa_detail[kolom_tabel], use_container_width=True, height=350, hide_index=True)
+            
+    else:
+        # Tampilan default jika belum ada titik yang diklik
+        st.markdown("### 📋 Tabel Akumulasi (Seluruh Desa yang Tampil)")
+        st.dataframe(df_grouped.sort_values("jumlah_kasus", ascending=False).drop(columns=["latitude", "longitude"]), use_container_width=True, hide_index=True)
 
 
 def page_pembiayaan(df_filtered, filter_info):

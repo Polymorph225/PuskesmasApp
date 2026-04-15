@@ -1,547 +1,1037 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import os
+import re
+import io
+import warnings
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import warnings
+from fpdf import FPDF
+from datetime import datetime, date
+import tempfile
+
+# ─── Machine Learning & Forecasting Libraries ───────────────────────────────
+import google.generativeai as genai
+from prophet import Prophet
+from prophet.diagnostics import cross_validation, performance_metrics
+
+# XGBoost & scikit-learn
+import xgboost as xgb
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.preprocessing import LabelEncoder
+
+# SARIMA
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+from statsmodels.tsa.stattools import adfuller
+
 warnings.filterwarnings('ignore')
 
-# Page Config
+# ============================================================
+# KONFIGURASI HALAMAN
+# ============================================================
 st.set_page_config(
-    page_title="Sistem Informasi Puskesmas",
+    page_title="Dashboard Puskesmas – Ensemble AI Forecasting",
     page_icon="🏥",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
-# Custom CSS
+# ============================================================
+# CSS
+# ============================================================
+def inject_custom_css():
+    st.markdown("""
+    <style>
+    .block-container { padding: 1.5rem 2rem 3rem 2rem; }
+    h1 { font-weight: 700 !important; }
+    div[data-testid="metric-container"] {
+        padding: 0.75rem 1rem;
+        border-radius: 0.75rem;
+        background-color: var(--secondary-background-color);
+        border: 1px solid var(--faded-text-color);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+    }
+    .model-badge {
+        display: inline-block;
+        padding: 0.2rem 0.7rem;
+        border-radius: 1rem;
+        font-size: 0.8rem;
+        font-weight: 700;
+        margin-right: 0.4rem;
+    }
+    .badge-prophet  { background:#dbeafe; color:#1d4ed8; }
+    .badge-xgb      { background:#dcfce7; color:#166534; }
+    .badge-sarima   { background:#fef3c7; color:#92400e; }
+    .badge-ensemble { background:#f3e8ff; color:#6b21a8; }
+    .badge-winner   { background:#fecaca; color:#991b1b; }
+    .accuracy-box {
+        padding: 1rem;
+        border-radius: 0.5rem;
+        background: rgba(59,130,246,0.07);
+        border: 1px solid rgba(59,130,246,0.25);
+        margin-bottom: 1rem;
+    }
+    .highlight-estimasi {
+        color: #1d4ed8 !important;
+        font-size: 1.05rem;
+        font-weight: 800;
+        line-height: 1.6;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+inject_custom_css()
+
+# ============================================================
+# HEADER
+# ============================================================
+st.title("📊 Dashboard Analisis Data Puskesmas")
 st.markdown("""
-<style>
-    .main { background-color: #f0f4f8; }
-    .stMetric { background: white; border-radius: 12px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-    .section-header { font-size: 1.3rem; font-weight: 700; color: #1a365d; margin: 1.5rem 0 0.5rem; border-left: 4px solid #3182ce; padding-left: 10px; }
-    .table-title { font-size: 1rem; font-weight: 600; color: #2d3748; margin: 1rem 0 0.3rem; }
-    div[data-testid="stDataFrame"] { border-radius: 10px; overflow: hidden; box-shadow: 0 1px 6px rgba(0,0,0,0.08); }
-</style>
-""", unsafe_allow_html=True)
+Dashboard ini membantu menganalisis **data kunjungan Puskesmas** dengan:
+- Filter interaktif: Poli, Diagnosa, Umur, Desa, Pembiayaan
+- **Ensemble Forecasting:** Prophet + XGBoost + SARIMA + Auto-Selection terbaik
+- **Disease Dominance Detection** per musim/bulan
+- **Evaluasi Akurasi** model (MAE, RMSE, MAPE) ditampilkan ke pengguna
 
+⬅️ **Mulai dengan meng-upload file data di sidebar.**
+""")
 
-# ── Sample Data ──────────────────────────────────────────────────────────────────
-@st.cache_data
-def load_data():
-    np.random.seed(42)
-
-    desa_list = [
-        {"nama": "Desa Sukamaju",  "lat": -7.2575, "lon": 112.7521, "kecamatan": "Kec. Wonokromo"},
-        {"nama": "Desa Harapan",   "lat": -7.2650, "lon": 112.7450, "kecamatan": "Kec. Wonokromo"},
-        {"nama": "Desa Mekarjaya", "lat": -7.2700, "lon": 112.7600, "kecamatan": "Kec. Gayungan"},
-        {"nama": "Desa Sejahtera", "lat": -7.2500, "lon": 112.7480, "kecamatan": "Kec. Gayungan"},
-        {"nama": "Desa Bahagia",   "lat": -7.2620, "lon": 112.7350, "kecamatan": "Kec. Jambangan"},
-        {"nama": "Desa Mandiri",   "lat": -7.2450, "lon": 112.7580, "kecamatan": "Kec. Jambangan"},
-        {"nama": "Desa Berdikari", "lat": -7.2730, "lon": 112.7490, "kecamatan": "Kec. Karang Pilang"},
-        {"nama": "Desa Merdeka",   "lat": -7.2550, "lon": 112.7420, "kecamatan": "Kec. Karang Pilang"},
-    ]
-
-    penyakit_list = [
-        "ISPA", "Diare", "Hipertensi", "Diabetes", "DBD",
-        "Malaria", "TBC", "Scabies", "Pneumonia", "Disentri"
-    ]
-
-    bulan_list = pd.date_range("2022-01-01", "2024-12-01", freq="MS")
-
-    records = []
-    for desa in desa_list:
-        for bulan in bulan_list:
-            for penyakit in penyakit_list:
-                jumlah = max(0, int(
-                    np.random.poisson(lam=20 if penyakit in ["ISPA", "Diare", "Hipertensi"] else 8)
-                    + np.random.normal(0, 3)
-                ))
-                records.append({
-                    "desa": desa["nama"],
-                    "lat": desa["lat"],
-                    "lon": desa["lon"],
-                    "kecamatan": desa["kecamatan"],
-                    "bulan": bulan,
-                    "tahun": bulan.year,
-                    "bulan_num": bulan.month,
-                    "penyakit": penyakit,
-                    "jumlah": jumlah
-                })
-
-    df = pd.DataFrame(records)
-
-    def get_musim(m):
-        if m in [11, 12, 1, 2, 3]:
-            return "Hujan"
-        elif m in [6, 7, 8, 9]:
-            return "Kemarau"
-        elif m in [4, 5]:
-            return "Peralihan Hujan-Kemarau"
-        else:
-            return "Peralihan Kemarau-Hujan"
-
-    df["musim"] = df["bulan_num"].apply(get_musim)
-    df["nama_bulan"] = df["bulan"].dt.strftime("%b %Y")
-    return df, desa_list
-
-
-df, desa_list = load_data()
-
-# ── Sidebar ───────────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("## Sistem Informasi Puskesmas")
-    st.divider()
-    page = st.radio(
-        "Navigasi",
-        ["Dashboard", "Analisis Penyakit", "Penyakit per Musim",
-         "Peta Persebaran", "Prediksi SARIMA"],
-        label_visibility="collapsed"
-    )
-    st.divider()
-    tahun_filter = st.multiselect("Filter Tahun", [2022, 2023, 2024], default=[2022, 2023, 2024])
-    penyakit_filter = st.multiselect(
-        "Filter Penyakit", sorted(df["penyakit"].unique()),
-        default=list(df["penyakit"].unique())
-    )
-
-df_filtered = df[df["tahun"].isin(tahun_filter) & df["penyakit"].isin(penyakit_filter)]
-
-URUTAN_MUSIM = ["Hujan", "Peralihan Hujan-Kemarau", "Kemarau", "Peralihan Kemarau-Hujan"]
-WARNA_MUSIM = {
-    "Hujan": "#3182ce", "Peralihan Hujan-Kemarau": "#48bb78",
-    "Kemarau": "#ed8936", "Peralihan Kemarau-Hujan": "#9f7aea"
-}
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# DASHBOARD
-# ═══════════════════════════════════════════════════════════════════════════════
-if page == "Dashboard":
-    st.title("Dashboard Sistem Informasi Puskesmas")
-    st.caption("Ringkasan data kunjungan dan penyakit wilayah kerja puskesmas")
-
-    total_kasus = df_filtered["jumlah"].sum()
-    total_desa = df_filtered["desa"].nunique()
-    top_penyakit = df_filtered.groupby("penyakit")["jumlah"].sum().idxmax()
-    kasus_bulan = df_filtered.groupby("bulan")["jumlah"].sum().iloc[-1] if not df_filtered.empty else 0
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total Kasus", f"{total_kasus:,}")
-    c2.metric("Jumlah Desa", total_desa)
-    c3.metric("Penyakit Tertinggi", top_penyakit)
-    c4.metric("Kasus Bulan Terakhir", f"{kasus_bulan:,}")
-
-    st.divider()
-    col1, col2 = st.columns(2)
-    with col1:
-        trend = df_filtered.groupby("bulan")["jumlah"].sum().reset_index()
-        fig = px.line(trend, x="bulan", y="jumlah", title="Tren Total Kasus per Bulan",
-                      markers=True, color_discrete_sequence=["#3182ce"])
-        fig.update_layout(xaxis_title="Bulan", yaxis_title="Jumlah Kasus", height=320)
-        st.plotly_chart(fig, use_container_width=True)
-    with col2:
-        top10 = df_filtered.groupby("penyakit")["jumlah"].sum().nlargest(10).reset_index()
-        fig2 = px.bar(top10, x="jumlah", y="penyakit", orientation="h",
-                      title="Top 10 Penyakit", color="jumlah", color_continuous_scale="Blues")
-        fig2.update_layout(yaxis={"categoryorder": "total ascending"}, height=320)
-        st.plotly_chart(fig2, use_container_width=True)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ANALISIS PENYAKIT
-# ═══════════════════════════════════════════════════════════════════════════════
-elif page == "Analisis Penyakit":
-    st.title("Analisis Penyakit")
-
-    # Grafik 1
-    st.markdown('<p class="section-header">Total Kasus per Penyakit</p>', unsafe_allow_html=True)
-    per_penyakit = (df_filtered.groupby("penyakit")["jumlah"].sum()
-                    .reset_index().sort_values("jumlah", ascending=False))
-    fig1 = px.bar(per_penyakit, x="penyakit", y="jumlah", color="jumlah",
-                  color_continuous_scale="Teal", text="jumlah")
-    fig1.update_traces(textposition="outside")
-    fig1.update_layout(xaxis_title="Penyakit", yaxis_title="Total Kasus", height=380, showlegend=False)
-    st.plotly_chart(fig1, use_container_width=True)
-
-    st.markdown('<p class="table-title">Tabel Rincian: Total Kasus per Penyakit</p>', unsafe_allow_html=True)
-    tbl1 = per_penyakit.copy()
-    tbl1["Persentase (%)"] = (tbl1["jumlah"] / tbl1["jumlah"].sum() * 100).round(2)
-    tbl1.insert(0, "Peringkat", range(1, len(tbl1) + 1))
-    tbl1 = tbl1.rename(columns={"penyakit": "Penyakit", "jumlah": "Total Kasus"})
-    st.dataframe(tbl1, use_container_width=True, hide_index=True)
-
-    st.divider()
-
-    # Grafik 2
-    st.markdown('<p class="section-header">Tren Bulanan per Penyakit</p>', unsafe_allow_html=True)
-    penyakit_sel = st.multiselect(
-        "Pilih Penyakit untuk Tren:", sorted(df_filtered["penyakit"].unique()),
-        default=list(df_filtered["penyakit"].unique())[:3]
-    )
-    if penyakit_sel:
-        tren_df = (df_filtered[df_filtered["penyakit"].isin(penyakit_sel)]
-                   .groupby(["bulan", "penyakit"])["jumlah"].sum().reset_index())
-        fig2 = px.line(tren_df, x="bulan", y="jumlah", color="penyakit",
-                       markers=True, title="Tren Kasus Penyakit per Bulan")
-        fig2.update_layout(xaxis_title="Bulan", yaxis_title="Jumlah Kasus", height=380)
-        st.plotly_chart(fig2, use_container_width=True)
-
-        st.markdown('<p class="table-title">Tabel Rincian: Tren Bulanan per Penyakit</p>', unsafe_allow_html=True)
-        tbl2 = tren_df.copy()
-        tbl2["bulan"] = tbl2["bulan"].dt.strftime("%b %Y")
-        tbl2 = tbl2.rename(columns={"bulan": "Bulan", "penyakit": "Penyakit", "jumlah": "Jumlah Kasus"})
-        st.dataframe(tbl2.sort_values(["Penyakit", "Bulan"]).reset_index(drop=True),
-                     use_container_width=True, hide_index=True)
-
-    st.divider()
-
-    # Grafik 3
-    st.markdown('<p class="section-header">Distribusi Penyakit per Desa (Heatmap)</p>', unsafe_allow_html=True)
-    heatmap_df = df_filtered.pivot_table(
-        index="desa", columns="penyakit", values="jumlah", aggfunc="sum"
-    ).fillna(0)
-    fig3 = px.imshow(heatmap_df, aspect="auto", color_continuous_scale="YlOrRd",
-                     title="Heatmap Penyakit per Desa", text_auto=True)
-    fig3.update_layout(height=400)
-    st.plotly_chart(fig3, use_container_width=True)
-
-    st.markdown('<p class="table-title">Tabel Rincian: Distribusi per Desa & Penyakit</p>', unsafe_allow_html=True)
-    tbl3 = (df_filtered.groupby(["desa", "penyakit"])["jumlah"].sum().reset_index()
-            .rename(columns={"desa": "Desa", "penyakit": "Penyakit", "jumlah": "Total Kasus"})
-            .sort_values(["Desa", "Total Kasus"], ascending=[True, False]).reset_index(drop=True))
-    st.dataframe(tbl3, use_container_width=True, hide_index=True)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PENYAKIT PER MUSIM
-# ═══════════════════════════════════════════════════════════════════════════════
-elif page == "Penyakit per Musim":
-    st.title("Penyakit per Musim")
-    st.caption("Analisis pola penyakit berdasarkan musim")
-
-    # Grafik 1
-    st.markdown('<p class="section-header">Total Kasus per Musim</p>', unsafe_allow_html=True)
-    per_musim = (df_filtered.groupby("musim")["jumlah"].sum()
-                 .reindex(URUTAN_MUSIM).reset_index())
-    fig1 = px.bar(per_musim, x="musim", y="jumlah", color="musim",
-                  color_discrete_map=WARNA_MUSIM, text="jumlah",
-                  title="Total Kasus Berdasarkan Musim")
-    fig1.update_traces(textposition="outside")
-    fig1.update_layout(xaxis_title="Musim", yaxis_title="Total Kasus", height=380, showlegend=False)
-    st.plotly_chart(fig1, use_container_width=True)
-
-    st.markdown('<p class="table-title">Tabel Rincian: Total Kasus per Musim</p>', unsafe_allow_html=True)
-    tbl_m = per_musim.copy()
-    tbl_m["Persentase (%)"] = (tbl_m["jumlah"] / tbl_m["jumlah"].sum() * 100).round(2)
-    tbl_m = tbl_m.rename(columns={"musim": "Musim", "jumlah": "Total Kasus"})
-    st.dataframe(tbl_m, use_container_width=True, hide_index=True)
-
-    st.divider()
-
-    # Grafik 2
-    st.markdown('<p class="section-header">Distribusi Penyakit per Musim</p>', unsafe_allow_html=True)
-    pm = df_filtered.groupby(["musim", "penyakit"])["jumlah"].sum().reset_index()
-    pm["musim"] = pd.Categorical(pm["musim"], categories=URUTAN_MUSIM, ordered=True)
-    pm = pm.sort_values("musim")
-    fig2 = px.bar(pm, x="penyakit", y="jumlah", color="musim",
-                  barmode="group", color_discrete_map=WARNA_MUSIM,
-                  title="Distribusi Penyakit per Musim")
-    fig2.update_layout(xaxis_title="Penyakit", yaxis_title="Jumlah Kasus", height=400)
-    st.plotly_chart(fig2, use_container_width=True)
-
-    st.markdown('<p class="table-title">Tabel Rincian: Penyakit per Musim (Pivot)</p>', unsafe_allow_html=True)
-    pivot_tbl2 = pm.rename(columns={"musim": "Musim", "penyakit": "Penyakit", "jumlah": "Jumlah Kasus"})
-    pivot_tbl2 = (pivot_tbl2.pivot_table(index="Penyakit", columns="Musim",
-                                         values="Jumlah Kasus", aggfunc="sum", fill_value=0)
-                  .reset_index())
-    pivot_tbl2["Total"] = pivot_tbl2.drop(columns="Penyakit").sum(axis=1)
-    pivot_tbl2 = pivot_tbl2.sort_values("Total", ascending=False).reset_index(drop=True)
-    st.dataframe(pivot_tbl2, use_container_width=True, hide_index=True)
-
-    st.divider()
-
-    # Grafik 3 Radar
-    st.markdown('<p class="section-header">Radar Chart Intensitas Penyakit per Musim</p>', unsafe_allow_html=True)
-    penyakit_radar = sorted(df_filtered["penyakit"].unique())
-    fig3 = go.Figure()
-    for musim in URUTAN_MUSIM:
-        vals = [
-            df_filtered[(df_filtered["musim"] == musim) & (df_filtered["penyakit"] == p)]["jumlah"].sum()
-            for p in penyakit_radar
-        ]
-        vals.append(vals[0])
-        fig3.add_trace(go.Scatterpolar(
-            r=vals, theta=penyakit_radar + [penyakit_radar[0]],
-            fill="toself", name=musim, line_color=WARNA_MUSIM[musim]
-        ))
-    fig3.update_layout(polar=dict(radialaxis=dict(visible=True)),
-                       title="Radar Penyakit per Musim", height=420)
-    st.plotly_chart(fig3, use_container_width=True)
-
-    st.markdown('<p class="table-title">Tabel Rincian: Statistik per Musim & Penyakit</p>', unsafe_allow_html=True)
-    tbl3 = df_filtered.groupby(["musim", "penyakit"])["jumlah"].agg(
-        Total="sum", Rata_Rata="mean", Maks="max", Min="min"
-    ).reset_index()
-    tbl3["Rata_Rata"] = tbl3["Rata_Rata"].round(1)
-    tbl3.columns = ["Musim", "Penyakit", "Total Kasus", "Rata-rata", "Maks", "Min"]
-    st.dataframe(tbl3, use_container_width=True, hide_index=True)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PETA PERSEBARAN  — Plotly Mapbox (tanpa folium / streamlit-folium)
-# ═══════════════════════════════════════════════════════════════════════════════
-elif page == "Peta Persebaran":
-    st.title("Peta Persebaran Penyakit")
-    st.caption(
-        "Klik titik pada peta atau gunakan tombol/dropdown di bawah "
-        "untuk melihat detail grafik dan tabel data per desa."
-    )
-
-    # session state
-    if "desa_dipilih" not in st.session_state:
-        st.session_state["desa_dipilih"] = None
-
-    # Agregasi
-    desa_totals = (
-        df_filtered.groupby(["desa", "lat", "lon", "kecamatan"])["jumlah"]
-        .sum().reset_index()
-    )
-    max_val = desa_totals["jumlah"].max()
-    desa_totals["ukuran"] = (desa_totals["jumlah"] / max_val * 40 + 15).round(1)
-
-    # Peta
-    fig_map = px.scatter_mapbox(
-        desa_totals,
-        lat="lat", lon="lon",
-        size="ukuran",
-        color="jumlah",
-        color_continuous_scale="Reds",
-        hover_name="desa",
-        hover_data={"kecamatan": True, "jumlah": True,
-                    "lat": False, "lon": False, "ukuran": False},
-        labels={"jumlah": "Total Kasus", "kecamatan": "Kecamatan"},
-        zoom=13,
-        center={"lat": desa_totals["lat"].mean(), "lon": desa_totals["lon"].mean()},
-        height=500,
-        size_max=50,
-    )
-    fig_map.add_trace(go.Scattermapbox(
-        lat=desa_totals["lat"].tolist(),
-        lon=desa_totals["lon"].tolist(),
-        mode="text",
-        text=desa_totals["desa"].str.replace("Desa ", "").tolist(),
-        textfont=dict(size=11, color="#1a365d"),
-        hoverinfo="skip",
-        showlegend=False,
-    ))
-    fig_map.update_layout(
-        mapbox_style="carto-positron",
-        margin={"r": 0, "t": 0, "l": 0, "b": 0},
-        coloraxis_colorbar=dict(title="Total Kasus"),
-    )
-
-    col_map, col_leg = st.columns([4, 1])
-    with col_map:
-        click_event = st.plotly_chart(
-            fig_map, use_container_width=True,
-            on_select="rerun", key="peta_plotly"
-        )
-    with col_leg:
-        st.markdown("#### Pilih Desa")
-        for _, row in desa_totals.sort_values("jumlah", ascending=False).iterrows():
-            if st.button(
-                f"{row['desa']}  ({int(row['jumlah']):,})",
-                key=f"btn_{row['desa']}", use_container_width=True
-            ):
-                st.session_state["desa_dipilih"] = row["desa"]
-                st.rerun()
-
-    # Deteksi klik peta
-    if (click_event and isinstance(click_event, dict)
-            and click_event.get("selection")
-            and click_event["selection"].get("points")):
-        pt = click_event["selection"]["points"][0]
-        clat, clon = pt.get("lat"), pt.get("lon")
-        if clat is not None and clon is not None:
-            desa_totals["_dist"] = np.sqrt(
-                (desa_totals["lat"] - clat) ** 2 + (desa_totals["lon"] - clon) ** 2
-            )
-            nearest = desa_totals.loc[desa_totals["_dist"].idxmin(), "desa"]
-            if nearest != st.session_state.get("desa_dipilih"):
-                st.session_state["desa_dipilih"] = nearest
-                st.rerun()
-
-    # Selector manual
-    opts = ["-- Pilih desa --"] + sorted(desa_totals["desa"].tolist())
-    idx = opts.index(st.session_state["desa_dipilih"]) if st.session_state["desa_dipilih"] in opts else 0
-    sel = st.selectbox("Atau pilih dari daftar:", opts, index=idx, key="selectbox_desa")
-    if sel != "-- Pilih desa --":
-        st.session_state["desa_dipilih"] = sel
-
-    desa_diklik = st.session_state["desa_dipilih"]
-
-    # ── Detail desa ───────────────────────────────────────────────────────────
-    if not desa_diklik:
-        st.info("Klik titik pada peta, tekan tombol desa di sebelah kanan, atau pilih dari dropdown.")
-    else:
-        st.success(f"Menampilkan data untuk: **{desa_diklik}**")
-        st.divider()
-        st.markdown(f"## Detail Data: {desa_diklik}")
-
-        df_desa = df_filtered[df_filtered["desa"] == desa_diklik]
-        kecamatan = df_desa["kecamatan"].iloc[0] if not df_desa.empty else "-"
-
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Total Kasus", f"{df_desa['jumlah'].sum():,}")
-        m2.metric("Kecamatan", kecamatan)
-        m3.metric("Penyakit Tertinggi",
-                  df_desa.groupby("penyakit")["jumlah"].sum().idxmax() if not df_desa.empty else "-")
-        m4.metric("Periode Data", f"{df_desa['tahun'].min()}-{df_desa['tahun'].max()}")
-
-        c1, c2 = st.columns(2)
-        with c1:
-            per_p = (df_desa.groupby("penyakit")["jumlah"].sum()
-                     .reset_index().sort_values("jumlah", ascending=True))
-            fig_p = px.bar(per_p, x="jumlah", y="penyakit", orientation="h",
-                           color="jumlah", color_continuous_scale="Reds",
-                           title=f"Total Kasus per Penyakit - {desa_diklik}", text="jumlah")
-            fig_p.update_traces(textposition="outside")
-            fig_p.update_layout(height=380, showlegend=False)
-            st.plotly_chart(fig_p, use_container_width=True)
-
-        with c2:
-            tren_d = df_desa.groupby("bulan")["jumlah"].sum().reset_index()
-            fig_t = px.line(tren_d, x="bulan", y="jumlah", markers=True,
-                            title=f"Tren Kasus Bulanan - {desa_diklik}",
-                            color_discrete_sequence=["#e53e3e"])
-            fig_t.update_layout(xaxis_title="Bulan", yaxis_title="Jumlah Kasus", height=380)
-            st.plotly_chart(fig_t, use_container_width=True)
-
-        per_musim_d = (df_desa.groupby("musim")["jumlah"].sum()
-                       .reindex(URUTAN_MUSIM).reset_index())
-        fig_m = px.pie(per_musim_d, names="musim", values="jumlah",
-                       title=f"Distribusi per Musim - {desa_diklik}",
-                       color_discrete_sequence=["#3182ce", "#48bb78", "#ed8936", "#9f7aea"])
-        st.plotly_chart(fig_m, use_container_width=True)
-
-        st.markdown(f'<p class="table-title">Tabel Rincian Data - {desa_diklik}</p>', unsafe_allow_html=True)
-        tab1, tab2, tab3 = st.tabs(["Per Penyakit", "Per Bulan", "Per Musim"])
-
-        with tab1:
-            tbl_p = df_desa.groupby("penyakit")["jumlah"].agg(
-                Total="sum", Rata_rata="mean", Maks="max", Min="min"
-            ).reset_index().sort_values("Total", ascending=False)
-            tbl_p["Rata_rata"] = tbl_p["Rata_rata"].round(1)
-            tbl_p["% dari Total"] = (tbl_p["Total"] / tbl_p["Total"].sum() * 100).round(2)
-            tbl_p.columns = ["Penyakit", "Total", "Rata-rata/Bulan", "Maks", "Min", "% dari Total"]
-            st.dataframe(tbl_p, use_container_width=True, hide_index=True)
-
-        with tab2:
-            tbl_b = df_desa.groupby(["bulan", "penyakit"])["jumlah"].sum().reset_index()
-            tbl_b["bulan"] = tbl_b["bulan"].dt.strftime("%b %Y")
-            tbl_b.columns = ["Bulan", "Penyakit", "Jumlah Kasus"]
-            st.dataframe(
-                tbl_b.sort_values(["Bulan", "Jumlah Kasus"], ascending=[True, False]).reset_index(drop=True),
-                use_container_width=True, hide_index=True
-            )
-
-        with tab3:
-            tbl_ms = df_desa.groupby(["musim", "penyakit"])["jumlah"].sum().reset_index()
-            tbl_ms.columns = ["Musim", "Penyakit", "Total Kasus"]
-            st.dataframe(
-                tbl_ms.sort_values(["Musim", "Total Kasus"], ascending=[True, False]).reset_index(drop=True),
-                use_container_width=True, hide_index=True
-            )
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PREDIKSI SARIMA
-# ═══════════════════════════════════════════════════════════════════════════════
-elif page == "Prediksi SARIMA":
-    st.title("Prediksi SARIMA")
-    st.caption("Prediksi jumlah kasus penyakit menggunakan model SARIMA")
-
+# ============================================================
+# GEMINI CLIENT
+# ============================================================
+@st.cache_resource
+def get_gemini_client():
+    api_key = None
     try:
-        from statsmodels.tsa.statespace.sarimax import SARIMAX
-        SARIMA_AVAILABLE = True
-    except ImportError:
-        SARIMA_AVAILABLE = False
-        st.warning("Package statsmodels tidak terinstall. Jalankan: pip install statsmodels")
+        api_key = st.secrets.get("GEMINI_API_KEY")
+    except Exception:
+        pass
+    if not api_key:
+        api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        st.warning("⚠️ API key Gemini belum diset. Fitur AI Agent tidak aktif.")
+        return False
+    try:
+        genai.configure(api_key=api_key)
+        return True
+    except Exception as e:
+        st.error(f"Gagal inisialisasi Gemini: {e}")
+        return False
 
-    col1, col2 = st.columns(2)
-    with col1:
-        penyakit_sarima = st.selectbox("Pilih Penyakit:", sorted(df["penyakit"].unique()))
-    with col2:
-        desa_sarima = st.selectbox("Pilih Desa:", ["Semua Desa"] + [d["nama"] for d in desa_list])
+# ============================================================
+# HELPER UMUM
+# ============================================================
+def convert_df_to_excel(df):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Data')
+    return output.getvalue()
 
-    bulan_prediksi = st.slider("Jumlah Bulan Prediksi:", 3, 24, 6)
 
-    if st.button("Jalankan Prediksi SARIMA", type="primary") and SARIMA_AVAILABLE:
-        with st.spinner("Melatih model SARIMA..."):
-            try:
-                if desa_sarima == "Semua Desa":
-                    ts_df = df[df["penyakit"] == penyakit_sarima].groupby("bulan")["jumlah"].sum()
-                else:
-                    ts_df = df[
-                        (df["penyakit"] == penyakit_sarima) & (df["desa"] == desa_sarima)
-                    ].groupby("bulan")["jumlah"].sum()
+TARGET_COLS = ["tanggal_kunjungan","no_rm","umur","jenis_kelamin","poli","diagnosa","pembiayaan","desa"]
 
-                ts_df = ts_df.asfreq("MS")
-                # FIX pandas >= 2.0: ffill()/bfill() menggantikan fillna(method=...)
-                ts_df = ts_df.ffill().bfill()
+def _normalize_col_name(col):
+    col = str(col).strip().lower()
+    return re.sub(r"[^a-z0-9]", "", col)
 
-                if len(ts_df) < 12:
-                    st.warning("Data terlalu sedikit untuk SARIMA. Minimal 12 bulan.")
-                else:
-                    model = SARIMAX(ts_df, order=(1, 1, 1), seasonal_order=(1, 1, 1, 12),
-                                    enforce_stationarity=False, enforce_invertibility=False)
-                    result = model.fit(disp=False)
+def _build_column_mapping(df_raw):
+    mapping = {}
+    alias_dict = {
+        "tanggal_kunjungan": ["tanggalkunjungan","tglkunjungan","tanggal","tgl","visitdate"],
+        "no_rm":    ["norm","norekammedis","norekam_medis","no_rekam_medis","rekammedis"],
+        "umur":     ["umur","usia","age","umurth"],
+        "jenis_kelamin": ["jeniskelamin","jk","sex","kelamin","llp"],
+        "poli":     ["poli","politujuan","unit","unitlayanan","poliklinik"],
+        "diagnosa": ["diagnosa","diagnosautama","dxutama","diag","icd10","diagnosis"],
+        "pembiayaan":["pembiayaan","carabayar","penjamin","jaminan","pembayar"],
+        "desa":     ["desa","alamatdesa","kelurahan","desakelurahan","namadesa"],
+    }
+    norm_cols = {col: _normalize_col_name(col) for col in df_raw.columns}
+    for std_name, aliases in alias_dict.items():
+        for raw_col, norm_key in norm_cols.items():
+            if norm_key in aliases:
+                mapping[raw_col] = std_name
+                break
+    return mapping
 
-                    forecast = result.get_forecast(steps=bulan_prediksi)
-                    pred_mean = forecast.predicted_mean
-                    pred_ci = forecast.conf_int()
+def _clean_jk(val):
+    if pd.isna(val): return np.nan
+    v = str(val).strip().lower()
+    if v in ["l","lk","laki","laki-laki","male","m","1"]: return "Laki-Laki"
+    if v in ["p","pr","perempuan","wanita","female","f","2"]: return "Perempuan"
+    return str(val).title()
 
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=ts_df.index, y=ts_df.values,
-                                             mode="lines+markers", name="Historis",
-                                             line=dict(color="#3182ce")))
-                    fig.add_trace(go.Scatter(x=pred_mean.index, y=pred_mean.values,
-                                             mode="lines+markers", name="Prediksi",
-                                             line=dict(color="#e53e3e", dash="dash")))
-                    fig.add_trace(go.Scatter(
-                        x=list(pred_ci.index) + list(pred_ci.index[::-1]),
-                        y=list(pred_ci.iloc[:, 1]) + list(pred_ci.iloc[:, 0][::-1]),
-                        fill="toself", fillcolor="rgba(229,62,62,0.15)",
-                        line=dict(color="rgba(0,0,0,0)"), name="Interval Kepercayaan 95%"
-                    ))
-                    fig.update_layout(
-                        title=f"Prediksi SARIMA - {penyakit_sarima} ({desa_sarima})",
-                        xaxis_title="Bulan", yaxis_title="Jumlah Kasus", height=420
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
+def _parse_umur(val):
+    if pd.isna(val): return np.nan
+    m = re.search(r"(\d+)", str(val))
+    if m:
+        try: return int(m.group(1))
+        except: return np.nan
+    try: return int(float(str(val)))
+    except: return np.nan
 
-                    st.markdown('<p class="table-title">Tabel Hasil Prediksi</p>', unsafe_allow_html=True)
-                    pred_tbl = pd.DataFrame({
-                        "Bulan": pred_mean.index.strftime("%b %Y"),
-                        "Prediksi Kasus": pred_mean.values.round(1),
-                        "Batas Bawah (95%)": pred_ci.iloc[:, 0].values.round(1),
-                        "Batas Atas (95%)": pred_ci.iloc[:, 1].values.round(1),
-                    })
-                    st.dataframe(pred_tbl, use_container_width=True, hide_index=True)
+def clean_raw_data(df_raw):
+    if df_raw is None or df_raw.empty: return df_raw
+    col_map = _build_column_mapping(df_raw)
+    df = df_raw.rename(columns=col_map).copy()
+    keep = [c for c in TARGET_COLS if c in df.columns]
+    df = df[keep].copy()
+    if "tanggal_kunjungan" in df.columns:
+        df["tanggal_kunjungan"] = pd.to_datetime(df["tanggal_kunjungan"], errors="coerce")
+    if "umur" in df.columns:
+        df["umur"] = df["umur"].apply(_parse_umur)
+    if "jenis_kelamin" in df.columns:
+        df["jenis_kelamin"] = df["jenis_kelamin"].apply(_clean_jk)
+    for col in ["poli","diagnosa","pembiayaan","desa","no_rm"]:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.strip().replace({"nan": np.nan})
+    return df
 
-                    with st.expander("Statistik Model SARIMA"):
-                        ca, cb, cc = st.columns(3)
-                        ca.metric("AIC", f"{result.aic:.2f}")
-                        cb.metric("BIC", f"{result.bic:.2f}")
-                        cc.metric("Log-Likelihood", f"{result.llf:.2f}")
-
-            except Exception as e:
-                st.error(f"SARIMA gagal: {str(e)}")
-                st.info("Coba kurangi kompleksitas order SARIMA atau periksa data Anda.")
-
-    elif not SARIMA_AVAILABLE:
-        st.info("Install statsmodels terlebih dahulu untuk menggunakan fitur prediksi.")
+@st.cache_data
+def load_data(file):
+    ext = file.name.lower().split(".")[-1]
+    if ext == "csv":
+        df_raw = pd.read_csv(file)
     else:
-        st.info("Pilih parameter dan klik tombol Jalankan Prediksi SARIMA untuk memulai.")
+        try:    df_raw = pd.read_excel(file, engine="openpyxl")
+        except: df_raw = pd.read_excel(file, engine="xlrd")
+    return clean_raw_data(df_raw), df_raw
+
+def preprocess_data(df):
+    if df is None or df.empty: return df
+    df.columns = [c.strip().lower() for c in df.columns]
+    if "umur" in df.columns:
+        df["umur"] = pd.to_numeric(df["umur"], errors="coerce")
+        bins   = [0,1,5,15,25,45,60,200]
+        labels = ["<1 th","1-4 th","5-14 th","15-24 th","25-44 th","45-59 th","60+ th"]
+        df["kelompok_umur"] = pd.cut(df["umur"], bins=bins, labels=labels, right=False)
+    if "tanggal_kunjungan" in df.columns:
+        df["tahun"]      = df["tanggal_kunjungan"].dt.year
+        df["bulan"]      = df["tanggal_kunjungan"].dt.month
+        df["nama_bulan"] = df["tanggal_kunjungan"].dt.strftime("%b")
+        df["minggu"]     = df["tanggal_kunjungan"].dt.isocalendar().week.astype(int)
+        df["hari_ke"]    = df["tanggal_kunjungan"].dt.dayofyear
+        # Musim hujan Indonesia: Nov-Apr → 1, kemarau: Mei-Okt → 0
+        df["musim_hujan"] = df["bulan"].apply(lambda m: 1 if m in [11,12,1,2,3,4] else 0)
+    for col in ["poli","jenis_kelamin","pembiayaan","diagnosa","desa"]:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.strip().str.title()
+    return df
+
+# ============================================================
+# SIDEBAR + FILTER
+# ============================================================
+def apply_filters(_):
+    with st.sidebar:
+        st.markdown("## 🏥 Data Kunjungan")
+        uploaded_file = st.file_uploader("Upload CSV / Excel", type=["csv","xlsx","xls"])
+        if uploaded_file is None:
+            st.info("Silakan upload file CSV/Excel.")
+            return None, None
+        df_clean, _ = load_data(uploaded_file)
+        df = preprocess_data(df_clean)
+        st.success("Data berhasil dimuat ✅")
+        st.caption(f"📊 {len(df):,} baris · {len(df.columns)} kolom".replace(",","."))
+
+        st.markdown("### 🔍 Filter Data")
+        date_range = poli_pilihan = jk_pilihan = bayar_pilihan = None
+        kelompok_umur_pilihan = desa_pilihan = kecuali_penyakit = None
+
+        with st.expander("Waktu & Poli", expanded=True):
+            if "tanggal_kunjungan" in df.columns:
+                mn, mx = df["tanggal_kunjungan"].min(), df["tanggal_kunjungan"].max()
+                if pd.notna(mn) and pd.notna(mx):
+                    date_range = st.date_input("Rentang Tanggal", value=[mn.date(), mx.date()])
+            if "poli" in df.columns:
+                poli_pilihan = st.multiselect("Poli", sorted(df["poli"].dropna().unique()))
+
+        with st.expander("Filter Lainnya", expanded=False):
+            if "jenis_kelamin" in df.columns:
+                jk_pilihan = st.multiselect("Jenis Kelamin", sorted(df["jenis_kelamin"].dropna().unique()))
+            if "kelompok_umur" in df.columns:
+                kelompok_umur_pilihan = st.multiselect("Kelompok Umur", df["kelompok_umur"].dropna().unique())
+            if "desa" in df.columns:
+                desa_pilihan = st.multiselect("Desa", sorted(df["desa"].dropna().unique()))
+            if "pembiayaan" in df.columns:
+                bayar_pilihan = st.multiselect("Pembiayaan", sorted(df["pembiayaan"].dropna().unique()))
+            if "diagnosa" in df.columns:
+                kecuali_penyakit = st.multiselect(
+                    "❌ Kecualikan Penyakit",
+                    sorted(df["diagnosa"].dropna().unique()),
+                    help="Penyakit ini tidak diikutkan dalam analisis."
+                )
+
+        df_f = df.copy()
+        if date_range and len(date_range)==2:
+            df_f = df_f[(df_f["tanggal_kunjungan"].dt.date >= date_range[0]) &
+                        (df_f["tanggal_kunjungan"].dt.date <= date_range[1])]
+        if poli_pilihan:           df_f = df_f[df_f["poli"].isin(poli_pilihan)]
+        if jk_pilihan:             df_f = df_f[df_f["jenis_kelamin"].isin(jk_pilihan)]
+        if bayar_pilihan:          df_f = df_f[df_f["pembiayaan"].isin(bayar_pilihan)]
+        if kelompok_umur_pilihan:  df_f = df_f[df_f["kelompok_umur"].isin(kelompok_umur_pilihan)]
+        if desa_pilihan:           df_f = df_f[df_f["desa"].isin(desa_pilihan)]
+        if kecuali_penyakit:       df_f = df_f[~df_f["diagnosa"].isin(kecuali_penyakit)]
+
+        return df_f, {
+            "poli": poli_pilihan, "jenis_kelamin": jk_pilihan,
+            "pembiayaan": bayar_pilihan, "kelompok_umur": kelompok_umur_pilihan,
+            "desa": desa_pilihan, "penyakit_dikecualikan": kecuali_penyakit,
+        }
+
+def show_active_filters(fi):
+    if not fi: return
+    chips = [f"{k.replace('_',' ').title()}: {', '.join(map(str,v))}" for k,v in fi.items() if v]
+    if chips: st.caption("🎯 **Filter aktif:** " + " | ".join(chips))
+
+# ============================================================
+# ═══════════  ENSEMBLE FORECASTING ENGINE  ═══════════════════
+# ============================================================
+
+# ── Feature Engineering ─────────────────────────────────────
+def build_features(weekly: pd.DataFrame) -> pd.DataFrame:
+    """Tambahkan fitur temporal & lag ke data mingguan."""
+    df = weekly.copy().sort_values("ds").reset_index(drop=True)
+    df["week_of_year"]  = df["ds"].dt.isocalendar().week.astype(int)
+    df["month"]         = df["ds"].dt.month
+    df["quarter"]       = df["ds"].dt.quarter
+    df["year"]          = df["ds"].dt.year
+    df["musim_hujan"]   = df["month"].apply(lambda m: 1 if m in [11,12,1,2,3,4] else 0)
+    df["is_ramadan"]    = 0  # placeholder – bisa diisi manual
+    # Lag features
+    for lag in [1, 2, 3, 4]:
+        df[f"lag_{lag}"] = df["y"].shift(lag)
+    # Rolling mean
+    df["roll_mean_4"]  = df["y"].shift(1).rolling(4).mean()
+    df["roll_mean_8"]  = df["y"].shift(1).rolling(8).mean()
+    df["roll_std_4"]   = df["y"].shift(1).rolling(4).std()
+    return df.dropna().reset_index(drop=True)
+
+
+# ── Metrik Evaluasi ──────────────────────────────────────────
+def eval_metrics(y_true, y_pred):
+    y_true = np.array(y_true, dtype=float)
+    y_pred = np.array(y_pred, dtype=float)
+    mask   = y_true != 0
+    mae    = mean_absolute_error(y_true, y_pred)
+    rmse   = np.sqrt(mean_squared_error(y_true, y_pred))
+    mape   = np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100 if mask.any() else np.nan
+    return {"MAE": round(mae, 2), "RMSE": round(rmse, 2), "MAPE": round(mape, 2)}
+
+
+# ── Prophet ──────────────────────────────────────────────────
+def run_prophet(train_df, periods, freq="W-MON"):
+    """Fit Prophet dan kembalikan forecast + metrics."""
+    m = Prophet(
+        yearly_seasonality=True,
+        weekly_seasonality=False,
+        daily_seasonality=False,
+        interval_width=0.80,
+        changepoint_prior_scale=0.05,
+    )
+    # Tambah regressor musim hujan
+    train_ext = train_df.copy()
+    train_ext["musim_hujan"] = train_ext["ds"].dt.month.apply(lambda mo: 1 if mo in [11,12,1,2,3,4] else 0)
+    m.add_regressor("musim_hujan")
+    m.fit(train_ext)
+
+    future = m.make_future_dataframe(periods=periods, freq=freq)
+    future["musim_hujan"] = future["ds"].dt.month.apply(lambda mo: 1 if mo in [11,12,1,2,3,4] else 0)
+    fc = m.predict(future)
+
+    # Hitung metrik pada data training
+    merged = train_ext.merge(fc[["ds","yhat"]], on="ds")
+    metrics = eval_metrics(merged["y"], merged["yhat"])
+    return fc, metrics, m
+
+
+# ── XGBoost ──────────────────────────────────────────────────
+def run_xgboost(train_df, periods, freq="W-MON"):
+    """Fit XGBoost dengan feature engineering dan prediksi iteratif."""
+    feat_df = build_features(train_df)
+    if len(feat_df) < 10:
+        return None, None
+
+    feat_cols = ["week_of_year","month","quarter","year","musim_hujan",
+                 "lag_1","lag_2","lag_3","lag_4",
+                 "roll_mean_4","roll_mean_8","roll_std_4"]
+    X_train = feat_df[feat_cols]
+    y_train = feat_df["y"]
+
+    model = xgb.XGBRegressor(
+        n_estimators=300,
+        learning_rate=0.05,
+        max_depth=4,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        random_state=42,
+        verbosity=0,
+    )
+    model.fit(X_train, y_train)
+
+    # In-sample metrics
+    y_pred_train = model.predict(X_train)
+    metrics = eval_metrics(y_train, y_pred_train)
+
+    # Iterative future prediction
+    last_date   = train_df["ds"].max()
+    history_y   = list(train_df["y"].values)
+    future_rows = []
+    for i in range(periods):
+        next_date = last_date + pd.Timedelta(weeks=i+1)
+        row = {
+            "week_of_year": int(next_date.isocalendar()[1]),
+            "month":        next_date.month,
+            "quarter":      (next_date.month - 1) // 3 + 1,
+            "year":         next_date.year,
+            "musim_hujan":  1 if next_date.month in [11,12,1,2,3,4] else 0,
+            "lag_1": history_y[-1],
+            "lag_2": history_y[-2] if len(history_y) >= 2 else history_y[-1],
+            "lag_3": history_y[-3] if len(history_y) >= 3 else history_y[-1],
+            "lag_4": history_y[-4] if len(history_y) >= 4 else history_y[-1],
+            "roll_mean_4": np.mean(history_y[-4:]),
+            "roll_mean_8": np.mean(history_y[-8:]),
+            "roll_std_4":  np.std(history_y[-4:]),
+        }
+        X_row  = pd.DataFrame([row])[feat_cols]
+        y_next = float(model.predict(X_row)[0])
+        history_y.append(max(0, y_next))
+        future_rows.append({"ds": next_date, "yhat": max(0, y_next)})
+
+    # Gabung dengan in-sample predictions
+    train_preds = pd.DataFrame({"ds": feat_df["ds"], "yhat": y_pred_train.clip(min=0)})
+    future_df   = pd.DataFrame(future_rows)
+    all_preds   = pd.concat([train_preds, future_df], ignore_index=True)
+    return all_preds, metrics
+
+
+# ── SARIMA ───────────────────────────────────────────────────
+def run_sarima(train_df, periods):
+    """Fit SARIMA(1,1,1)(1,1,0,52) dan prediksi."""
+    ts = train_df.set_index("ds")["y"].asfreq("W-MON").fillna(method="ffill")
+    try:
+        model = SARIMAX(
+            ts, order=(1,1,1), seasonal_order=(1,1,0,52),
+            enforce_stationarity=False, enforce_invertibility=False,
+        )
+        fit   = model.fit(disp=False, maxiter=200)
+
+        # In-sample
+        y_pred_train = fit.fittedvalues.clip(lower=0)
+        metrics = eval_metrics(ts.values, y_pred_train.values)
+
+        # Future
+        fc_obj    = fit.get_forecast(steps=periods)
+        fc_mean   = fc_obj.predicted_mean.clip(lower=0)
+        fc_ci     = fc_obj.conf_int(alpha=0.2)
+
+        # Build output dataframe
+        train_preds = pd.DataFrame({"ds": ts.index, "yhat": y_pred_train.values})
+        future_df   = pd.DataFrame({
+            "ds":         fc_mean.index,
+            "yhat":       fc_mean.values,
+            "yhat_lower": fc_ci.iloc[:,0].clip(lower=0).values,
+            "yhat_upper": fc_ci.iloc[:,1].values,
+        })
+        all_preds = pd.concat([train_preds, future_df], ignore_index=True)
+        return all_preds, metrics
+    except Exception as e:
+        return None, None
+
+
+# ── Ensemble Auto-Selection ───────────────────────────────────
+def ensemble_forecast(train_df: pd.DataFrame, periods: int):
+    """
+    Jalankan ketiga model, evaluasi MAPE, buat weighted ensemble,
+    dan pilih model terbaik otomatis.
+    """
+    results = {}
+
+    # Prophet
+    with st.spinner("🔵 Melatih Prophet..."):
+        try:
+            fc_p, met_p, _ = run_prophet(train_df, periods)
+            results["Prophet"] = {"fc": fc_p, "metrics": met_p}
+        except Exception as e:
+            st.warning(f"Prophet gagal: {e}")
+
+    # XGBoost
+    with st.spinner("🟢 Melatih XGBoost..."):
+        try:
+            fc_x, met_x = run_xgboost(train_df, periods)
+            if fc_x is not None:
+                results["XGBoost"] = {"fc": fc_x, "metrics": met_x}
+        except Exception as e:
+            st.warning(f"XGBoost gagal: {e}")
+
+    # SARIMA
+    with st.spinner("🟡 Melatih SARIMA..."):
+        try:
+            fc_s, met_s = run_sarima(train_df, periods)
+            if fc_s is not None:
+                results["SARIMA"] = {"fc": fc_s, "metrics": met_s}
+        except Exception as e:
+            st.warning(f"SARIMA gagal: {e}")
+
+    if not results:
+        return None, None, None, None
+
+    # Tentukan model terbaik berdasarkan MAPE (atau RMSE jika MAPE nan)
+    def score(m):
+        mape = m["metrics"].get("MAPE", np.nan) if m["metrics"] else np.nan
+        rmse = m["metrics"].get("RMSE", np.nan) if m["metrics"] else np.nan
+        return mape if not np.isnan(mape) else rmse
+
+    best_name = min(results, key=lambda k: score(results[k]))
+    best_fc   = results[best_name]["fc"]
+
+    # Weighted ensemble untuk future predictions
+    future_dfs = []
+    weights    = []
+    for name, r in results.items():
+        sc = score(r)
+        if sc and not np.isnan(sc):
+            weights.append(1.0 / (sc + 1e-6))
+            fc = r["fc"]
+            if "yhat" in fc.columns:
+                future_dfs.append(fc[["ds","yhat"]].rename(columns={"yhat": f"yhat_{name}"}))
+
+    ensemble_fc = None
+    if len(future_dfs) > 1:
+        merged = future_dfs[0]
+        for df_m in future_dfs[1:]:
+            merged = merged.merge(df_m, on="ds", how="inner")
+        yhat_cols = [c for c in merged.columns if c.startswith("yhat_")]
+        total_w   = sum(weights[:len(yhat_cols)])
+        merged["yhat_ensemble"] = sum(
+            merged[col] * w for col, w in zip(yhat_cols, weights[:len(yhat_cols)])
+        ) / total_w
+        ensemble_fc = merged
+
+    return results, best_name, best_fc, ensemble_fc
+
+
+# ══════════════════════════════════════════════════════════════
+# HALAMAN UTAMA: ENSEMBLE FORECASTING (page_ml_upgraded)
+# ══════════════════════════════════════════════════════════════
+
+def page_ml_upgraded(df_filtered, filter_info):
+    st.subheader("🤖 Ensemble AI Forecasting (Prophet + XGBoost + SARIMA)")
+    show_active_filters(filter_info)
+
+    if df_filtered is None or len(df_filtered) == 0:
+        st.warning("⚠️ Data kosong.")
+        return
+    if "tanggal_kunjungan" not in df_filtered.columns:
+        st.error("❌ Kolom 'tanggal_kunjungan' tidak ditemukan.")
+        return
+
+    # ── Penjelasan arsitektur ──────────────────────────────────
+    with st.expander("ℹ️ Tentang Arsitektur Ensemble Model", expanded=False):
+        st.markdown("""
+        | Model | Keunggulan | Kelemahan |
+        |---|---|---|
+        | **Prophet** | Tren + seasonality otomatis, robust terhadap missing data | Tidak memodelkan fitur eksogen secara eksplisit |
+        | **XGBoost** | Feature engineering fleksibel (lag, musim, rolling) | Butuh data cukup untuk konvergensi |
+        | **SARIMA** | Kuat untuk pola autoregresif musiman | Sensitif terhadap stasioneritas, lambat untuk data panjang |
+        | **Ensemble** | Gabungan bobot berdasarkan MAPE terbaik → akurasi tertinggi | Lebih kompleks, waktu training lebih lama |
+
+        **Auto-Selection:** Model dengan MAPE terendah dipilih sebagai *best single model*.
+        **Weighted Ensemble:** Bobot proporsional terhadap 1/MAPE masing-masing model.
+        """)
+
+    df_ml = df_filtered.copy()
+    if not pd.api.types.is_datetime64_any_dtype(df_ml["tanggal_kunjungan"]):
+        df_ml["tanggal_kunjungan"] = pd.to_datetime(df_ml["tanggal_kunjungan"], errors="coerce")
+    df_ml = df_ml.dropna(subset=["tanggal_kunjungan"])
+    if len(df_ml) == 0:
+        st.warning("⚠️ Data tanggal tidak valid.")
+        return
+
+    max_date = df_ml["tanggal_kunjungan"].max().date()
+
+    st.markdown("---")
+    col1, col2, col3, col4 = st.columns([1.5, 1.5, 1.5, 1])
+    with col1:
+        fokus = st.radio("Analisis:", ["Diagnosa Penyakit", "Poli / Unit"], horizontal=True)
+    kolom_fokus = "diagnosa" if fokus == "Diagnosa Penyakit" else "poli"
+    with col2:
+        if kolom_fokus not in df_ml.columns:
+            st.error(f"Kolom '{kolom_fokus}' tidak ada.")
+            return
+        top_items   = df_ml[kolom_fokus].value_counts().head(30)
+        pilihan_item = st.selectbox(f"Pilih {fokus}:", top_items.index.tolist())
+    with col3:
+        target_date = st.date_input(
+            "Prediksi Sampai:",
+            value=max_date + pd.Timedelta(days=60),
+            min_value=max_date + pd.Timedelta(days=7),
+            max_value=max_date + pd.Timedelta(days=365),
+        )
+    with col4:
+        freq_label  = st.selectbox("Frekuensi:", ["Mingguan","Bulanan"])
+        freq_map    = {"Mingguan": "W-MON", "Bulanan": "MS"}
+        freq        = freq_map[freq_label]
+
+    # ── Siapkan data time-series ──────────────────────────────
+    df_item = df_ml[df_ml[kolom_fokus] == pilihan_item].copy()
+    if len(df_item) < 15:
+        st.error("❌ Data terlalu sedikit (< 15 baris) untuk ensemble forecasting.")
+        return
+
+    grouper   = pd.Grouper(key="tanggal_kunjungan", freq=freq)
+    weekly    = df_item.groupby(grouper).size().reset_index(name="y")
+    weekly    = weekly.rename(columns={"tanggal_kunjungan": "ds"})
+    weekly    = weekly[weekly["y"] > 0]
+
+    if len(weekly) < 8:
+        st.error("❌ Data agregat terlalu sedikit setelah resampling.")
+        return
+
+    # Hitung periods
+    last_date_ts = weekly["ds"].max()
+    target_dt    = pd.to_datetime(target_date)
+    if freq == "W-MON":
+        periods = max(1, int((target_dt - last_date_ts).days // 7))
+    else:
+        periods = max(1, int((target_dt.year - last_date_ts.year) * 12 +
+                             (target_dt.month - last_date_ts.month)))
+
+    st.info(f"📊 Data: **{len(weekly)}** titik · Prediksi: **{periods}** {'minggu' if freq=='W-MON' else 'bulan'} ke depan")
+
+    # ── Jalankan Ensemble ─────────────────────────────────────
+    if st.button("🚀 Jalankan Ensemble Forecasting", type="primary"):
+        results, best_name, best_fc, ensemble_fc = ensemble_forecast(weekly, periods)
+
+        if not results:
+            st.error("Semua model gagal. Coba dengan data lebih panjang.")
+            return
+
+        st.success(f"✅ Selesai! Model terbaik: **{best_name}**")
+
+        # ── Tabel Evaluasi Akurasi ────────────────────────────
+        st.markdown("### 📊 Evaluasi Akurasi Model")
+        st.markdown("""
+        > **MAE** = rata-rata error absolut · **RMSE** = root mean square error · **MAPE** = error persentase rata-rata
+        > MAPE < 10% = Sangat Baik · 10–20% = Baik · > 20% = Perlu Perbaikan
+        """)
+        eval_rows = []
+        for name, r in results.items():
+            if r["metrics"]:
+                row = {"Model": name, **r["metrics"]}
+                row["Status"] = "🏆 Terbaik" if name == best_name else ""
+                eval_rows.append(row)
+
+        eval_df = pd.DataFrame(eval_rows)
+        st.dataframe(
+            eval_df.style.highlight_min(subset=["MAE","RMSE","MAPE"], color="#d1fae5"),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        # ── Grafik Perbandingan Model ─────────────────────────
+        st.markdown(f"### 📈 Perbandingan Prediksi: **{pilihan_item}**")
+        fig = go.Figure()
+
+        # Aktual
+        fig.add_trace(go.Scatter(
+            x=weekly["ds"], y=weekly["y"],
+            mode="lines+markers", name="Aktual",
+            line=dict(color="#1d4ed8", width=2),
+        ))
+
+        colors = {"Prophet": "#ef4444", "XGBoost": "#16a34a", "SARIMA": "#d97706"}
+        for name, r in results.items():
+            fc = r["fc"]
+            fc_future = fc[fc["ds"] > last_date_ts]
+            if "yhat" in fc.columns:
+                fig.add_trace(go.Scatter(
+                    x=fc_future["ds"], y=fc_future["yhat"].clip(lower=0),
+                    mode="lines", name=f"{name}",
+                    line=dict(color=colors.get(name, "#6b7280"), width=2, dash="dot"),
+                ))
+
+        # Ensemble
+        if ensemble_fc is not None:
+            ens_future = ensemble_fc[ensemble_fc["ds"] > last_date_ts]
+            if not ens_future.empty:
+                fig.add_trace(go.Scatter(
+                    x=ens_future["ds"], y=ens_future["yhat_ensemble"].clip(lower=0),
+                    mode="lines+markers", name="⭐ Ensemble",
+                    line=dict(color="#7c3aed", width=3),
+                ))
+
+        # Best model confidence interval (Prophet saja yang punya CI lengkap)
+        if "Prophet" in results and best_name == "Prophet":
+            fc_p = results["Prophet"]["fc"]
+            fc_p_future = fc_p[fc_p["ds"] > last_date_ts]
+            if {"yhat_upper","yhat_lower"}.issubset(fc_p_future.columns):
+                fig.add_trace(go.Scatter(
+                    x=fc_p_future["ds"].tolist() + fc_p_future["ds"].tolist()[::-1],
+                    y=fc_p_future["yhat_upper"].tolist() + fc_p_future["yhat_lower"].tolist()[::-1],
+                    fill="toself", fillcolor="rgba(239,68,68,0.15)",
+                    line=dict(color="rgba(255,255,255,0)"),
+                    name="CI Prophet 80%", hoverinfo="skip",
+                ))
+
+        fig.update_layout(
+            xaxis_title="Periode", yaxis_title="Jumlah Kunjungan",
+            hovermode="x unified",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02),
+            margin=dict(l=0, r=0, t=30, b=0),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        # ── Ringkasan Estimasi ────────────────────────────────
+        st.markdown(f"### 📢 Kesimpulan Estimasi Hingga {target_dt.strftime('%d %B %Y')}")
+
+        # Gunakan ensemble atau best model
+        use_fc = None
+        use_label = ""
+        if ensemble_fc is not None and "yhat_ensemble" in ensemble_fc.columns:
+            use_fc    = ensemble_fc[ensemble_fc["ds"] > last_date_ts][["ds","yhat_ensemble"]].rename(columns={"yhat_ensemble":"yhat"})
+            use_label = "Ensemble (berbobot)"
+        elif best_fc is not None and "yhat" in best_fc.columns:
+            use_fc    = best_fc[best_fc["ds"] > last_date_ts][["ds","yhat"]]
+            use_label = best_name
+
+        if use_fc is not None and not use_fc.empty:
+            use_fc["yhat"] = use_fc["yhat"].clip(lower=0)
+            total_est      = int(round(use_fc["yhat"].sum()))
+            akhir_row      = use_fc.iloc[-1]
+            tgl_akhir      = akhir_row["ds"].strftime("%d %B %Y")
+            est_akhir      = int(round(akhir_row["yhat"]))
+
+            col_a, col_b, col_c = st.columns([2, 1, 1])
+            with col_a:
+                st.markdown(f"""
+                <div class="accuracy-box">
+                <div class="highlight-estimasi">
+                📆 Hingga <b>{tgl_akhir}</b>, model <b>{use_label}</b> memperkirakan 
+                total akumulasi <b>{total_est:,} kunjungan/kasus</b> untuk <b>{pilihan_item}</b>.<br><br>
+                Pada periode terakhir, diperkirakan <b>{est_akhir} kunjungan</b> baru.
+                </div></div>
+                """.replace(",","."), unsafe_allow_html=True)
+            with col_b:
+                st.metric("Total Estimasi Akumulasi", f"{total_est:,}".replace(",","."))
+            with col_c:
+                st.metric("Estimasi Periode Terakhir", f"{est_akhir}")
+
+            # Download
+            dl_df = use_fc.copy()
+            dl_df.columns = ["Periode","Prediksi_Jumlah"]
+            st.download_button(
+                "📥 Download Prediksi (Excel)",
+                convert_df_to_excel(dl_df),
+                f"prediksi_{pilihan_item.lower().replace(' ','_')}.xlsx",
+            )
+
+
+# ══════════════════════════════════════════════════════════════
+# HALAMAN: DETEKSI PENYAKIT DOMINAN PER MUSIM
+# ══════════════════════════════════════════════════════════════
+
+def page_disease_seasonality(df_filtered, filter_info):
+    st.subheader("🌧️ Deteksi Penyakit Dominan per Musim / Bulan")
+    show_active_filters(filter_info)
+
+    if df_filtered is None or len(df_filtered) == 0:
+        st.warning("⚠️ Data kosong.")
+        return
+    if not {"tanggal_kunjungan","diagnosa"}.issubset(df_filtered.columns):
+        st.error("❌ Butuh kolom 'tanggal_kunjungan' dan 'diagnosa'.")
+        return
+
+    df = df_filtered.copy()
+    df["bulan"]       = df["tanggal_kunjungan"].dt.month
+    df["nama_bulan"]  = df["tanggal_kunjungan"].dt.strftime("%b")
+    df["musim"]       = df["bulan"].apply(lambda m: "🌧️ Hujan (Nov–Apr)" if m in [11,12,1,2,3,4] else "☀️ Kemarau (Mei–Okt)")
+
+    st.markdown("---")
+    tab1, tab2, tab3 = st.tabs(["Heatmap Bulanan", "Penyakit per Musim", "Tren Penyakit Spesifik"])
+
+    with tab1:
+        st.markdown("#### 🗓️ Heatmap Frekuensi Penyakit per Bulan")
+        top_n = st.slider("Jumlah penyakit ditampilkan", 5, 20, 10, key="heat_n")
+        top_diag = df["diagnosa"].value_counts().head(top_n).index.tolist()
+        df_heat = df[df["diagnosa"].isin(top_diag)].copy()
+        pivot = df_heat.groupby(["diagnosa","bulan"]).size().unstack(fill_value=0)
+        pivot.columns = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"][:len(pivot.columns)]
+
+        fig_heat = px.imshow(
+            pivot,
+            color_continuous_scale="YlOrRd",
+            aspect="auto",
+            title="Jumlah Kasus per Penyakit per Bulan",
+            labels={"color":"Jumlah Kasus"},
+        )
+        fig_heat.update_layout(margin=dict(l=0,r=0,t=40,b=0))
+        st.plotly_chart(fig_heat, use_container_width=True)
+        st.download_button("📥 Download Heatmap Data", convert_df_to_excel(pivot.reset_index()), "heatmap_penyakit.xlsx")
+
+    with tab2:
+        st.markdown("#### 🌦️ Top Penyakit per Musim")
+        col_a, col_b = st.columns(2)
+        for musim_label, col_ui in zip(["🌧️ Hujan (Nov–Apr)", "☀️ Kemarau (Mei–Okt)"], [col_a, col_b]):
+            df_musim = df[df["musim"] == musim_label]
+            if df_musim.empty:
+                col_ui.info(f"Tidak ada data untuk {musim_label}")
+                continue
+            top_diag_musim = df_musim["diagnosa"].value_counts().head(10).reset_index()
+            top_diag_musim.columns = ["Diagnosa","Kasus"]
+            fig = px.bar(
+                top_diag_musim, x="Kasus", y="Diagnosa",
+                orientation="h", title=musim_label,
+                color="Kasus", color_continuous_scale="Blues",
+                text="Kasus",
+            )
+            fig.update_traces(textposition="outside")
+            fig.update_layout(coloraxis_showscale=False, height=350, yaxis=dict(categoryorder="total ascending"))
+            col_ui.plotly_chart(fig, use_container_width=True)
+
+        # Penyakit yang berbeda signifikan antar musim
+        st.markdown("#### 📊 Perbandingan Intensitas Penyakit: Hujan vs Kemarau")
+        df_comp = df.groupby(["musim","diagnosa"]).size().unstack(fill_value=0).T
+        if df_comp.shape[1] == 2:
+            df_comp.columns = ["Hujan","Kemarau"]
+            df_comp["Selisih"] = df_comp["Hujan"] - df_comp["Kemarau"]
+            df_comp["Dominan_Musim"] = df_comp["Selisih"].apply(
+                lambda x: "🌧️ Hujan" if x > 0 else "☀️ Kemarau"
+            )
+            df_comp = df_comp.sort_values("Selisih", key=abs, ascending=False).head(15)
+            st.dataframe(df_comp.reset_index().rename(columns={"diagnosa":"Diagnosa"}), use_container_width=True)
+
+    with tab3:
+        st.markdown("#### 📈 Tren Bulanan Penyakit Tertentu")
+        top_all = df["diagnosa"].value_counts().head(20).index.tolist()
+        penyakit_pilih = st.multiselect("Pilih penyakit untuk dibandingkan:", top_all, default=top_all[:3])
+        if penyakit_pilih:
+            df_trend = df[df["diagnosa"].isin(penyakit_pilih)].groupby(["bulan","diagnosa"]).size().reset_index(name="kasus")
+            bulan_map = {1:"Jan",2:"Feb",3:"Mar",4:"Apr",5:"Mei",6:"Jun",
+                         7:"Jul",8:"Agu",9:"Sep",10:"Okt",11:"Nov",12:"Des"}
+            df_trend["nama_bulan"] = df_trend["bulan"].map(bulan_map)
+            fig_trend = px.line(
+                df_trend, x="nama_bulan", y="kasus",
+                color="diagnosa", markers=True,
+                title="Tren Kasus Bulanan per Penyakit",
+                category_orders={"nama_bulan": list(bulan_map.values())},
+            )
+            st.plotly_chart(fig_trend, use_container_width=True)
+
+
+# ══════════════════════════════════════════════════════════════
+# HALAMAN LAMA (dipertahankan)
+# ══════════════════════════════════════════════════════════════
+
+def page_overview(df_filtered, filter_info):
+    st.subheader("📌 Ringkasan Umum")
+    show_active_filters(filter_info)
+    if df_filtered is None or len(df_filtered) == 0:
+        st.warning("Tidak ada data.")
+        return
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total Kunjungan", len(df_filtered))
+    if "no_rm"    in df_filtered.columns: col2.metric("Pasien Unik", df_filtered["no_rm"].nunique())
+    if "poli"     in df_filtered.columns: col3.metric("Poli Aktif",  df_filtered["poli"].nunique())
+    if "diagnosa" in df_filtered.columns: col4.metric("Diagnosa",    df_filtered["diagnosa"].nunique())
+    st.markdown("---")
+    if "tanggal_kunjungan" in df_filtered.columns:
+        st.markdown("### 📈 Tren Kunjungan")
+        trend = df_filtered.groupby(["tahun","bulan","nama_bulan"]).size().reset_index(name="count") \
+                            .sort_values(["tahun","bulan"])
+        trend["label"] = trend["nama_bulan"].astype(str) + "-" + trend["tahun"].astype(str)
+        st.line_chart(trend.set_index("label")["count"])
+        st.download_button("📥 Download Tren", convert_df_to_excel(trend), "tren_kunjungan.xlsx")
+    if "poli" in df_filtered.columns:
+        st.markdown("### 🏥 Distribusi Poli")
+        df_poli = df_filtered["poli"].value_counts().reset_index()
+        df_poli.columns = ["Poli","Jumlah"]
+        st.bar_chart(df_poli.set_index("Poli"))
+
+
+def page_kunjungan(df_filtered, filter_info):
+    st.subheader("👥 Analisis Kunjungan")
+    show_active_filters(filter_info)
+    if df_filtered is None or len(df_filtered) == 0: return
+    col1, col2 = st.columns(2)
+    if "jenis_kelamin" in df_filtered.columns:
+        df_jk = df_filtered["jenis_kelamin"].value_counts().reset_index()
+        df_jk.columns = ["Jenis Kelamin","Jumlah"]
+        col1.markdown("#### Jenis Kelamin")
+        col1.bar_chart(df_jk.set_index("Jenis Kelamin"))
+    if "kelompok_umur" in df_filtered.columns:
+        df_umur = df_filtered["kelompok_umur"].value_counts().sort_index().reset_index()
+        df_umur.columns = ["Kelompok Umur","Jumlah"]
+        col2.markdown("#### Kelompok Umur")
+        col2.bar_chart(df_umur.set_index("Kelompok Umur"))
+
+
+def page_penyakit(df_filtered, filter_info):
+    st.subheader("🦠 Analisis Penyakit")
+    show_active_filters(filter_info)
+    if df_filtered is None or len(df_filtered) == 0: return
+    if "diagnosa" not in df_filtered.columns:
+        st.error("❌ Kolom 'diagnosa' tidak ditemukan.")
+        return
+    col_s, col_u, col_t = st.columns([2,2,1])
+    with col_s: top_n = st.slider("Jumlah diagnosa", 5, 30, 10)
+    with col_u:
+        urutan = st.radio("Urut:", ["⬇️ Terbanyak","⬆️ Tersedikit"], horizontal=True)
+    with col_t:
+        orientasi = st.selectbox("Orientasi", ["Horizontal","Vertikal"])
+    ascending = urutan.startswith("⬆️")
+    df_diag = df_filtered["diagnosa"].value_counts().head(top_n).reset_index()
+    df_diag.columns = ["Diagnosa","Jumlah Kasus"]
+    df_diag = df_diag.sort_values("Jumlah Kasus", ascending=ascending).reset_index(drop=True)
+    chart_h = max(350, top_n * 38)
+    if orientasi == "Horizontal":
+        fig = px.bar(df_diag, x="Jumlah Kasus", y="Diagnosa", orientation="h",
+                     text="Jumlah Kasus", color="Jumlah Kasus", color_continuous_scale="Blues")
+        fig.update_traces(textposition="outside")
+        fig.update_layout(yaxis=dict(categoryorder="total ascending" if ascending else "total descending"),
+                          coloraxis_showscale=False, height=chart_h)
+    else:
+        fig = px.bar(df_diag, x="Diagnosa", y="Jumlah Kasus",
+                     text="Jumlah Kasus", color="Jumlah Kasus", color_continuous_scale="Blues")
+        fig.update_layout(xaxis=dict(tickangle=-35), coloraxis_showscale=False, height=chart_h)
+    st.plotly_chart(fig, use_container_width=True)
+    st.download_button("📥 Download Data Penyakit", convert_df_to_excel(df_diag), "top_penyakit.xlsx")
+
+
+def page_peta_persebaran(df_filtered, filter_info):
+    st.subheader("🗺️ Peta Persebaran Penyakit")
+    show_active_filters(filter_info)
+    if df_filtered is None or len(df_filtered) == 0: return
+    if not {"desa","diagnosa"}.issubset(df_filtered.columns):
+        st.error("❌ Butuh kolom 'desa' dan 'diagnosa'.")
+        return
+    top_penyakit = df_filtered["diagnosa"].value_counts().head(20).index.tolist()
+    pilihan = st.selectbox("Pilih Diagnosa:", ["-- Semua Top 10 --"] + top_penyakit)
+    if pilihan != "-- Semua Top 10 --":
+        df_map = df_filtered[df_filtered["diagnosa"] == pilihan].copy()
+    else:
+        df_map = df_filtered[df_filtered["diagnosa"].isin(df_filtered["diagnosa"].value_counts().head(10).index)]
+    df_grouped = df_map.groupby(["desa","diagnosa"]).size().reset_index(name="jumlah_kasus")
+    koordinat_desa = {
+        "Donan":(-7.2131,111.6364),"Gapluk":(-7.2017,111.6617),
+        "Kaliombo":(-7.235,111.6817),"Kuniran":(-7.2346,111.6510),
+        "Ngrejeng":(-7.2260,111.7071),"Pelem":(-7.2394,111.7011),
+        "Pojok":(-7.1892,111.6728),"Punggur":(-7.2048,111.6808),
+        "Purwosari":(-7.1798,111.6608),"Sedahkidul":(-7.1973,111.6792),
+        "Tinumpuk":(-7.2117,111.68),"Tlatah":(-7.2172,111.6975),
+    }
+    def get_koord(desa): return koordinat_desa.get(str(desa).strip().title(), (-7.1509,111.8817))
+    df_grouped["latitude"]  = df_grouped["desa"].apply(lambda x: get_koord(x)[0])
+    df_grouped["longitude"] = df_grouped["desa"].apply(lambda x: get_koord(x)[1])
+    fig = px.scatter_mapbox(
+        df_grouped, lat="latitude", lon="longitude",
+        color="diagnosa", size="jumlah_kasus",
+        hover_name="desa", hover_data={"diagnosa":True,"jumlah_kasus":True},
+        zoom=11.5, center={"lat":-7.218,"lon":111.675}, height=550,
+        color_discrete_sequence=px.colors.qualitative.Plotly,
+    )
+    fig.update_layout(mapbox_style="carto-positron", margin={"r":0,"t":0,"l":0,"b":0})
+    st.plotly_chart(fig, use_container_width=True)
+    st.dataframe(df_grouped.sort_values("jumlah_kasus", ascending=False), use_container_width=True, hide_index=True)
+
+
+def page_pembiayaan(df_filtered, filter_info):
+    st.subheader("💳 Analisis Pembiayaan")
+    if df_filtered is None or "pembiayaan" not in df_filtered.columns: return
+    df_b = df_filtered["pembiayaan"].value_counts().reset_index()
+    df_b.columns = ["Pembiayaan","Jumlah"]
+    st.bar_chart(df_b.set_index("Pembiayaan"))
+    st.download_button("📥 Download Pembiayaan", convert_df_to_excel(df_b), "pembiayaan.xlsx")
+
+
+def page_data(df_filtered, filter_info):
+    st.subheader("📄 Data & Unduhan")
+    if df_filtered is None: return
+    st.dataframe(df_filtered)
+    st.download_button("💾 Download CSV", df_filtered.to_csv(index=False).encode("utf-8"), "data_puskesmas.csv", "text/csv")
+
+
+def page_quality(df):
+    st.subheader("🧹 Kualitas Data")
+    if df is None: return
+    st.write(f"Duplikasi: **{df.duplicated().sum()}** baris")
+    st.markdown("**Missing Values:**")
+    st.dataframe(df.isna().sum().to_frame("Missing Count"), use_container_width=True)
+
+
+def page_ai_assistant(df_filtered, filter_info, is_genai):
+    st.subheader("🤖 Asisten AI (Gemini)")
+    if df_filtered is None or df_filtered.empty:
+        st.warning("Upload dan filter data terlebih dahulu.")
+        return
+    if not is_genai:
+        st.error("❌ API Key Gemini belum diset.")
+        return
+    total = len(df_filtered)
+    top_dx = ", ".join([f"{k}({v})" for k,v in df_filtered["diagnosa"].value_counts().head(5).items()]) \
+             if "diagnosa" in df_filtered.columns else "-"
+    top_pl = ", ".join([f"{k}({v})" for k,v in df_filtered["poli"].value_counts().head(3).items()]) \
+             if "poli" in df_filtered.columns else "-"
+    ctx = f"""[DATA REAL-TIME]
+- Total kunjungan: {total}
+- 5 penyakit terbanyak: {top_dx}
+- 3 poli terpadat: {top_pl}"""
+    user_q = st.text_area("Tanyakan strategi/analisis:", placeholder="Contoh: Program promkes apa yang paling mendesak?")
+    if st.button("Kirim"):
+        if not user_q.strip(): st.warning("Pertanyaan kosong."); return
+        prompt = f"""Anda adalah Analis Kesehatan Masyarakat di UPT Puskesmas Purwosari (Bojonegoro).
+{ctx}
+Jawab pertanyaan berikut secara spesifik, berbasis data, dan terstruktur:
+{user_q}"""
+        with st.spinner("AI menganalisis..."):
+            try:
+                model = genai.GenerativeModel("gemini-2.5-flash")
+                resp  = model.generate_content(prompt)
+                st.markdown("### 📊 Analisis AI:")
+                st.markdown(resp.text)
+            except Exception as e:
+                st.error(f"Gagal: {e}")
+
+
+# ══════════════════════════════════════════════════════════════
+# MAIN
+# ══════════════════════════════════════════════════════════════
+
+def main():
+    is_genai = get_gemini_client()
+    df_filtered, filter_info = apply_filters(None)
+
+    pages = {
+        "📌 Ringkasan":                page_overview,
+        "👥 Analisis Kunjungan":       page_kunjungan,
+        "🦠 Analisis Penyakit":        page_penyakit,
+        "🌧️ Penyakit per Musim":      page_disease_seasonality,
+        "🗺️ Peta Persebaran":         page_peta_persebaran,
+        "🤖 Ensemble Forecasting":     page_ml_upgraded,
+        "💳 Pembiayaan":               page_pembiayaan,
+        "🧹 Kualitas Data":            page_quality,
+        "📄 Data & Unduhan":           page_data,
+        "💬 Asisten AI":               None,
+    }
+
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("### 🗂️ Navigasi")
+        page_sel = st.radio("Pilih halaman:", list(pages.keys()), label_visibility="collapsed")
+
+    if df_filtered is None:
+        st.info("👈 Upload file data di sidebar untuk memulai.")
+        return
+
+    if page_sel == "💬 Asisten AI":
+        page_ai_assistant(df_filtered, filter_info, is_genai)
+    elif page_sel == "🧹 Kualitas Data":
+        page_quality(df_filtered)
+    else:
+        fn = pages[page_sel]
+        if fn: fn(df_filtered, filter_info)
+
+if __name__ == "__main__":
+    main()

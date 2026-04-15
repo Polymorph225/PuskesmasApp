@@ -932,9 +932,69 @@ def page_peta_persebaran(df_filtered, filter_info):
         zoom=11.5, center={"lat":-7.218,"lon":111.675}, height=550,
         color_discrete_sequence=px.colors.qualitative.Plotly,
     )
-    fig.update_layout(mapbox_style="carto-positron", margin={"r":0,"t":0,"l":0,"b":0})
-    st.plotly_chart(fig, use_container_width=True)
-    st.dataframe(df_grouped.sort_values("jumlah_kasus", ascending=False), use_container_width=True, hide_index=True)
+    fig.update_layout(mapbox_style=map_style)
+    fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
+    
+    clicked_desa = None
+    try:
+        event = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
+        if hasattr(event, "selection") and hasattr(event.selection, "points") and len(event.selection.points) > 0:
+            point = event.selection.points[0]
+            if "customdata" in point:
+                clicked_desa = point["customdata"][0]
+            elif "hovertext" in point:
+                clicked_desa = point["hovertext"]
+    except TypeError:
+        st.plotly_chart(fig, use_container_width=True)
+        pilihan_fallback = st.selectbox("Pilih Desa untuk melihat statistik spesifik:", options=["-- Klik Pilih --"] + sorted(df_filtered["desa"].dropna().unique().tolist()))
+        if pilihan_fallback != "-- Klik Pilih --":
+            clicked_desa = pilihan_fallback
+
+    st.info("👆 **TIPS INTERAKTIF:** Klik pada salah satu titik/lingkaran desa di peta untuk melihat profil statistik kesehatannya secara langsung!")
+
+    if clicked_desa:
+        st.markdown("---")
+        st.markdown(f"### 📍 Profil Kesehatan Desa: **{clicked_desa}**")
+        
+        df_desa = df_filtered[df_filtered["desa"] == clicked_desa]
+        
+        if len(df_desa) > 0:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Total Kunjungan", f"{len(df_desa)} Pasien")
+            
+            penyakit_terbanyak = df_desa["diagnosa"].mode()[0] if "diagnosa" in df_desa.columns and not df_desa["diagnosa"].empty else "-"
+            c2.metric("Penyakit Dominan", penyakit_terbanyak)
+            
+            if "jenis_kelamin" in df_desa.columns:
+                mayoritas_gender = df_desa["jenis_kelamin"].mode()[0] if not df_desa["jenis_kelamin"].empty else "-"
+                c3.metric("Mayoritas Gender", mayoritas_gender)
+            
+            col_d1, col_d2 = st.columns(2)
+            with col_d1:
+                st.markdown("**Top 5 Penyakit Terbanyak**")
+                st.bar_chart(df_desa["diagnosa"].value_counts().head(5))
+            with col_d2:
+                st.markdown("**Demografi Usia Pasien**")
+                if "kelompok_umur" in df_desa.columns:
+                    st.bar_chart(df_desa["kelompok_umur"].value_counts().sort_index())
+                    
+        else:
+            st.warning(f"Data tidak tersedia untuk desa {clicked_desa}.")
+            
+        st.caption("ℹ️ *Klik pada area kosong di peta atau klik ulang titik desa untuk menutup profil ini.*")
+        
+    st.markdown("---")
+    col_tabel, col_grafik = st.columns([1, 1])
+    
+    with col_tabel:
+        st.markdown("#### 📋 Detail Kasus per Desa")
+        st.dataframe(df_grouped[["desa", "diagnosa", "jumlah_kasus"]].sort_values(by="jumlah_kasus", ascending=False), use_container_width=True, hide_index=True)
+
+    with col_grafik:
+        st.markdown("#### 📊 Top Desa Terdampak")
+        top_desa_df = df_grouped.groupby("desa")["jumlah_kasus"].sum().reset_index().sort_values("jumlah_kasus", ascending=False).head(10)
+        st.bar_chart(top_desa_df.set_index("desa")["jumlah_kasus"])
+        st.download_button("📥 Download Data Top Desa (Excel)", convert_df_to_excel(top_desa_df), "top_desa_terdampak.xlsx")
 
 
 def page_pembiayaan(df_filtered, filter_info):

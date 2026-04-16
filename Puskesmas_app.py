@@ -89,18 +89,27 @@ inject_custom_css()
 # HEADER
 # ============================================================
 st.title("📊 Dashboard Analisis Data Puskesmas")
-st.markdown("""
-Dashboard ini membantu menganalisis **data kunjungan Puskesmas** dengan:
-- Filter interaktif: Poli, Diagnosa, Umur, Desa, Pembiayaan
-- **Ensemble Forecasting:**
-- **Disease Dominance Detection** per musim/bulan
-- **Evaluasi Akurasi** model (MAE, RMSE, MAPE) ditampilkan ke pengguna
+col_header1, col_header2 = st.columns([2, 1])
 
-Untuk data cleaning dapat menggunakan aplikasi berikut:
-https://data-cleaning-app-for-puskesmasapp.streamlit.app/
+with col_header1:
+    st.markdown("""
+    Dashboard ini membantu menganalisis **data kunjungan Puskesmas** dengan:
+    - Filter interaktif: Poli, Diagnosa, Umur, Desa, Pembiayaan
+    - **Ensemble Forecasting** & **Disease Dominance Detection**
+    - **Evaluasi Akurasi** model (MAE, RMSE, MAPE)
+    """)
 
-⬅️ **Mulai dengan meng-upload file data di sidebar.**
-""")
+with col_header2:
+    st.info("💡 **Data belum bersih?**")
+    st.link_button(
+        "✨ Buka Data Cleaning App", 
+        "https://data-cleaning-app-for-puskesmasapp.streamlit.app/",
+        use_container_width=True,
+        help="Klik untuk membersihkan format data sebelum diupload ke dashboard ini."
+    )
+
+st.markdown("---")
+st.markdown("⬅️ **Mulai dengan meng-upload file data di sidebar.**")
 
 # ============================================================
 # GEMINI CLIENT

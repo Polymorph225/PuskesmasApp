@@ -1042,7 +1042,7 @@ def page_quality(df):
 
 
 def page_ai_assistant(df_filtered, filter_info, is_genai):
-    st.subheader("🤖 Asisten AI (Gemini)")
+    st.subheader("🤖 Asisten AI")
     if df_filtered is None or df_filtered.empty:
         st.warning("Upload dan filter data terlebih dahulu.")
         return

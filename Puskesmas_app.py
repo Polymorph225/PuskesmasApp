@@ -550,7 +550,7 @@ def ensemble_forecast(train_df: pd.DataFrame, periods: int):
 # ══════════════════════════════════════════════════════════════
 
 def page_ml_upgraded(df_filtered, filter_info):
-    st.subheader("🤖 Ensemble AI Forecasting (Prophet + XGBoost + SARIMA)")
+    st.subheader("🤖 Ensemble AI Forecasting
     show_active_filters(filter_info)
 
     if df_filtered is None or len(df_filtered) == 0:

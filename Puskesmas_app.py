@@ -100,7 +100,7 @@ with col_header1:
     """)
 
 with col_header2:
-    st.info("💡 **Data belum bersih?**")
+    st.info("💡 **Apabila Data Tidak Dapat Diunggah, Bersihkan Dulu Disini!**")
     st.link_button(
         "✨ Buka Data Cleaning App", 
         "https://data-cleaning-app-for-puskesmasapp.streamlit.app/",
